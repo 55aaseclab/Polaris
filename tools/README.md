@@ -2,7 +2,11 @@
 
 This is the single repository-level implementation root for reusable Polaris
 tools. A workflow may bind ports to these tools, but it must not own a nested
-copy of them.
+copy of them. Domain-specific tools are the exception (PRD 3.11.8): they ship
+inside their pack under `packs/<pack>/tools/`, their inventory entrypoints
+point at pack-local paths, and they resolve straight from the repository
+root. This tree stays global: the CLH runtime lives in `packages/llm-harness`,
+and the existing autoresearch tools remain here untouched.
 
 `tool-inventory.json` is the checked-in inventory of tool entrypoints,
 versions, commands, and capability summaries. It contains no credentials,

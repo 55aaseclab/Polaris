@@ -5,10 +5,11 @@ import path from "node:path";
 import test from "node:test";
 import { runCli } from "../scripts/cli/main.js";
 import { applyHostToolDefaults } from "../scripts/tools/defaults.js";
-import { readHostToolBackendLocks } from "../scripts/tools/inventory.js";
+import { resolveToolEntrypointPath } from "../scripts/tools/entrypoint.js";
+import { readHostToolBackendLocks, readToolInventory } from "../scripts/tools/inventory.js";
 import { evaluateToolPrecheck } from "../scripts/tools/precheck.js";
 import { evaluatePortalToolStatus } from "../scripts/tools/status.js";
-import { polarisCacheRoot } from "../scripts/utils/paths.js";
+import { polarisCacheRoot, repoRoot } from "../scripts/utils/paths.js";
 
 async function captureStdout(fn: () => Promise<void>): Promise<string> {
   const chunks: string[] = [];
@@ -46,6 +47,46 @@ test("every common tool lock declares prerequisites and Python tools declare req
       assert.ok(Array.isArray(lock.prerequisites.python.requirements), `${lock.toolId} requirements`);
     }
   }
+});
+
+test("tool entrypoint resolution prefers pack-local paths with a tools/ fallback (PRD 3.11.8)", () => {
+  const root = "/synthetic/repo-root";
+  assert.equal(
+    resolveToolEntrypointPath(root, "packs/synthetic-pack/tools/synthetic-tool/synthetic-tool"),
+    path.join(root, "packs", "synthetic-pack", "tools", "synthetic-tool", "synthetic-tool"),
+  );
+  assert.equal(
+    resolveToolEntrypointPath(root, "synthetic-tool/synthetic-tool"),
+    path.join(root, "tools", "synthetic-tool", "synthetic-tool"),
+  );
+});
+
+test("inventory resolves cve tools pack-locally and keeps autoresearch tools global (PRD 3.11.8)", () => {
+  const root = repoRoot(import.meta.url);
+  const entries = readToolInventory(import.meta.url);
+  const processor = entries.find((entry) => entry.id === "cve.processor");
+  assert.ok(processor);
+  assert.equal(
+    processor.entrypoint,
+    "packs/cve-genie-trial/tools/cve-processor/cve-processor",
+  );
+  assert.equal(
+    processor.directory,
+    path.join(root, "packs", "cve-genie-trial", "tools", "cve-processor"),
+  );
+  assert.equal(
+    processor.lockPath,
+    path.join(root, "packs", "cve-genie-trial", "tools", "cve-processor", "backend.lock.json"),
+  );
+  assert.ok(fs.existsSync(processor.lockPath), "pack-local backend.lock.json");
+  // Existing autoresearch entries keep the global tools/ layout untouched.
+  const collection = entries.find((entry) => entry.id === "literature.collection");
+  assert.ok(collection);
+  assert.equal(collection.entrypoint, "data-collection/clue-data-collection");
+  assert.equal(
+    collection.directory,
+    path.join(root, "tools", "data-collection"),
+  );
 });
 
 test("host tool defaults point Polaristool cache aliases at $DATA_ROOT/cache", () => {

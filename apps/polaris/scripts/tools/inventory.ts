@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { repoRoot } from "../utils/paths.js";
+import { toolEntrypointDirectory } from "./entrypoint.js";
 
 export type ToolPrerequisiteKind = "required" | "recommended";
 
@@ -113,7 +114,7 @@ export function readToolInventory(importMetaUrl: string): ToolInventoryEntry[] {
       || !Array.isArray(item.commands)) {
       return [];
     }
-    const directory = path.join(root, "tools", path.dirname(item.entrypoint));
+    const directory = toolEntrypointDirectory(root, item.entrypoint);
     return [{
       id: item.id,
       entrypoint: item.entrypoint,

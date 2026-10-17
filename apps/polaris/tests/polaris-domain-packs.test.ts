@@ -61,6 +61,87 @@ ${body}
 `;
 }
 
+/** Synthetic self-contained pack directory (PRD 3.11.8 fixture). */
+function writeSyntheticPackDir(dataRoot: string): string {
+  const packDir = path.join(dataRoot, "source-pack");
+  fs.mkdirSync(path.join(packDir, "harness"), { recursive: true });
+  fs.mkdirSync(path.join(packDir, "tools", "synthetic-tool", "node_modules"), { recursive: true });
+  fs.writeFileSync(packDir + "/main.ord", packSource("1.0.0", `
+port ReadValue version "1.0.0" {
+  in { key: String }
+  out { value: String }
+  effect read
+}
+
+flow Read title "Read value" create {
+  input { key: String required }
+  needs { ReadValue }
+  steps {
+    read "Read" { uses { key } call ReadValue output { value: String } }
+  }
+  output { value: String from value }
+  ui { layout form primary "Run" }
+}
+`), "utf8");
+  fs.writeFileSync(path.join(packDir, "ATTRIBUTION.md"), "synthetic attribution\n", "utf8");
+  fs.writeFileSync(
+    path.join(packDir, "harness", "synthetic-preset.yaml"),
+    "kind: api\nid: synthetic-preset\n",
+    "utf8",
+  );
+  const runSh = path.join(packDir, "tools", "synthetic-tool", "run.sh");
+  fs.writeFileSync(runSh, "#!/usr/bin/env sh\nexit 0\n", "utf8");
+  fs.chmodSync(runSh, 0o755);
+  fs.writeFileSync(
+    path.join(packDir, "tools", "synthetic-tool", "node_modules", "placeholder.js"),
+    "build artifact\n",
+    "utf8",
+  );
+  return packDir;
+}
+
+test("pack add installs the full pack directory with tools and harness (PRD 3.11.8)", { concurrency: false }, async () => {
+  await withDataRoot(async (dataRoot) => {
+    const packDir = writeSyntheticPackDir(dataRoot);
+    await runCli(["pack", "add", packDir]);
+
+    const installedRoot = path.join(dataRoot, "control", "domain-packs", "SamplePack", "1.0.0");
+    assert.equal(fs.statSync(installedRoot).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(path.join(installedRoot, "main.ord")).mode & 0o777, 0o600);
+    // The installed artifact is the full pack: harness presets and tools ship
+    // with it (PRD 3.11.8 fixes the presets-not-installed gap).
+    assert.equal(fs.existsSync(path.join(installedRoot, "harness", "synthetic-preset.yaml")), true);
+    assert.equal(fs.existsSync(path.join(installedRoot, "ATTRIBUTION.md")), true);
+    const installedRunSh = path.join(installedRoot, "tools", "synthetic-tool", "run.sh");
+    assert.equal(fs.existsSync(installedRunSh), true);
+    assert.equal(fs.statSync(installedRunSh).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(path.join(installedRoot, "harness")).mode & 0o777, 0o700);
+    // node_modules build artifacts stay out of the installation.
+    assert.equal(
+      fs.existsSync(path.join(installedRoot, "tools", "synthetic-tool", "node_modules")),
+      false,
+    );
+    // The generated manifest wins over any copied manifest.
+    assert.equal(fs.statSync(path.join(installedRoot, "manifest.json")).mode & 0o777, 0o600);
+  });
+});
+
+test("pack remove takes the installed pack-local tools away (PRD 3.11.8)", { concurrency: false }, async () => {
+  await withDataRoot(async (dataRoot) => {
+    const packDir = writeSyntheticPackDir(dataRoot);
+    await runCli(["pack", "add", packDir]);
+    const installedRoot = path.join(dataRoot, "control", "domain-packs", "SamplePack", "1.0.0");
+    assert.equal(
+      fs.existsSync(path.join(installedRoot, "tools", "synthetic-tool", "run.sh")),
+      true,
+    );
+
+    await runCli(["pack", "remove", "SamplePack", "--version", "1.0.0"]);
+    // Directory-contained tools are removed with the pack automatically.
+    assert.equal(fs.existsSync(installedRoot), false);
+  });
+});
+
 async function withDataRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "polaris-domain-packs-"));
   const previous = process.env.POLARIS_DATA_ROOT;

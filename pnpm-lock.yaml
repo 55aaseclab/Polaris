@@ -252,14 +252,14 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  tools/cve-builder:
+  packs/cve-genie-trial/tools/cve-builder:
     dependencies:
       '@polaris/cve-common':
         specifier: workspace:*
         version: link:../cve-common
       '@polaris/llm-harness':
         specifier: workspace:*
-        version: link:../../packages/llm-harness
+        version: link:../../../../packages/llm-harness
     devDependencies:
       '@types/node':
         specifier: ^24.0.3
@@ -271,11 +271,11 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  tools/cve-common:
+  packs/cve-genie-trial/tools/cve-common:
     dependencies:
       '@polaris/llm-harness':
         specifier: workspace:*
-        version: link:../../packages/llm-harness
+        version: link:../../../../packages/llm-harness
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -290,14 +290,14 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  tools/cve-exploiter:
+  packs/cve-genie-trial/tools/cve-exploiter:
     dependencies:
       '@polaris/cve-common':
         specifier: workspace:*
         version: link:../cve-common
       '@polaris/llm-harness':
         specifier: workspace:*
-        version: link:../../packages/llm-harness
+        version: link:../../../../packages/llm-harness
     devDependencies:
       '@types/node':
         specifier: ^24.0.3
@@ -309,14 +309,14 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  tools/cve-processor:
+  packs/cve-genie-trial/tools/cve-processor:
     dependencies:
       '@polaris/cve-common':
         specifier: workspace:*
         version: link:../cve-common
       '@polaris/llm-harness':
         specifier: workspace:*
-        version: link:../../packages/llm-harness
+        version: link:../../../../packages/llm-harness
     devDependencies:
       '@types/node':
         specifier: ^24.0.3
@@ -328,14 +328,14 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  tools/cve-verifier:
+  packs/cve-genie-trial/tools/cve-verifier:
     dependencies:
       '@polaris/cve-common':
         specifier: workspace:*
         version: link:../cve-common
       '@polaris/llm-harness':
         specifier: workspace:*
-        version: link:../../packages/llm-harness
+        version: link:../../../../packages/llm-harness
     devDependencies:
       '@types/node':
         specifier: ^24.0.3

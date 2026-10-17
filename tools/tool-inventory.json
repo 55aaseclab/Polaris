@@ -95,29 +95,29 @@
     },
     {
       "id": "cve.processor",
-      "entrypoint": "cve-processor/cve-processor",
-      "version_file": "cve-processor/VERSION",
+      "entrypoint": "packs/cve-genie-trial/tools/cve-processor/cve-processor",
+      "version_file": "packs/cve-genie-trial/tools/cve-processor/VERSION",
       "commands": ["workflow", "fetch", "build-knowledge"],
       "capabilities": ["source-location", "affected-version-extraction", "knowledge-base"]
     },
     {
       "id": "cve.builder",
-      "entrypoint": "cve-builder/cve-builder",
-      "version_file": "cve-builder/VERSION",
+      "entrypoint": "packs/cve-genie-trial/tools/cve-builder/cve-builder",
+      "version_file": "packs/cve-genie-trial/tools/cve-builder/VERSION",
       "commands": ["workflow", "plan", "setup"],
       "capabilities": ["setup-plan", "vulnerable-environment", "dev-critic-convergence"]
     },
     {
       "id": "cve.exploiter",
-      "entrypoint": "cve-exploiter/cve-exploiter",
-      "version_file": "cve-exploiter/VERSION",
+      "entrypoint": "packs/cve-genie-trial/tools/cve-exploiter/cve-exploiter",
+      "version_file": "packs/cve-genie-trial/tools/cve-exploiter/VERSION",
       "commands": ["workflow", "exploit"],
       "capabilities": ["poc-generation", "dev-critic-convergence", "single-attempt"]
     },
     {
       "id": "cve.verifier",
-      "entrypoint": "cve-verifier/cve-verifier",
-      "version_file": "cve-verifier/VERSION",
+      "entrypoint": "packs/cve-genie-trial/tools/cve-verifier/cve-verifier",
+      "version_file": "packs/cve-genie-trial/tools/cve-verifier/VERSION",
       "commands": ["workflow", "verify"],
       "capabilities": ["ctf-flag-checker", "verifier-revision-bound", "dev-critic-convergence"]
     }

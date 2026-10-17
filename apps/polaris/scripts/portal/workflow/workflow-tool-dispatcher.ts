@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
 import { repoRoot } from "../../utils/paths.js";
+import { resolveToolEntrypointPath } from "../../tools/entrypoint.js";
 import type {
   CtxValue,
   FfiInvokeRequest,
@@ -207,7 +208,10 @@ export class WorkflowToolDispatcher {
         workspaceRoot: root,
         input: mapInput(req.input, port.binding.aliases),
       });
-      const executable = path.join(repoRoot(this.options.importMetaUrl), "tools", tool.entrypoint);
+      const executable = resolveToolEntrypointPath(
+        repoRoot(this.options.importMetaUrl),
+        tool.entrypoint,
+      );
       await run(
         executable,
         ["workflow", command, "--input", inputPath, "--output", outputPath],

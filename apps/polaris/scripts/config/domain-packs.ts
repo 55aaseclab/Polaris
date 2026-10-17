@@ -458,13 +458,48 @@ function packLoader(
   };
 }
 
-function resolveInputSource(inputPath: string): { source: string; path: string } {
+/**
+ * Copy the rest of a source pack directory into the staged installation
+ * (PRD 3.11.8): the installed artifact is the full pack (tools/, harness/,
+ * attribution), not just main.ord + manifest. Build artifacts (node_modules)
+ * and the generated manifest are skipped; symlinks fail closed.
+ */
+function copyPackTree(sourceRoot: string, targetRoot: string): void {
+  for (const entry of fs.readdirSync(sourceRoot, { withFileTypes: true })) {
+    if (
+      entry.name === DOMAIN_PACK_SOURCE_FILE
+      || entry.name === DOMAIN_PACK_MANIFEST_FILE
+      || entry.name === "node_modules"
+    ) {
+      continue;
+    }
+    const from = path.join(sourceRoot, entry.name);
+    const to = path.join(targetRoot, entry.name);
+    assertNotSymlink(from, "pack content");
+    if (entry.isDirectory()) {
+      ensurePrivateDirectory(to);
+      copyPackTree(from, to);
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error(`Domain Pack content must be a regular file or directory: ${from}`);
+    }
+    const executable = (fs.statSync(from).mode & 0o100) !== 0;
+    fs.copyFileSync(from, to);
+    fs.chmodSync(to, executable ? 0o700 : 0o600);
+  }
+}
+
+function resolveInputSource(inputPath: string): { source: string; path: string; packRoot?: string } {
   const resolved = path.resolve(process.cwd(), inputPath.trim());
   if (!fs.existsSync(resolved)) {
     throw new Error(`Domain Pack source was not found: ${inputPath}`);
   }
   assertNotSymlink(resolved, "input");
   const stats = fs.statSync(resolved);
+  if (!stats.isDirectory() && !stats.isFile()) {
+    throw new Error(`Domain Pack source must be a file or directory: ${resolved}`);
+  }
   const sourcePath = stats.isDirectory()
     ? path.join(resolved, DOMAIN_PACK_SOURCE_FILE)
     : resolved;
@@ -475,7 +510,11 @@ function resolveInputSource(inputPath: string): { source: string; path: string }
   if (!fs.statSync(sourcePath).isFile()) {
     throw new Error(`Domain Pack source is not a file: ${sourcePath}`);
   }
-  return { source: fs.readFileSync(sourcePath, "utf8"), path: sourcePath };
+  return {
+    source: fs.readFileSync(sourcePath, "utf8"),
+    path: sourcePath,
+    ...(stats.isDirectory() ? { packRoot: resolved } : {}),
+  };
 }
 
 function formatPipelineFailure(result: PipelineResult): string {
@@ -890,6 +929,7 @@ export async function addDomainPack(
         { encoding: "utf8", mode: 0o600 },
       );
       fs.chmodSync(manifestPath, 0o600);
+      if (input.packRoot) copyPackTree(input.packRoot, temporaryRoot);
       fs.renameSync(temporaryRoot, targetRoot);
     } catch (error) {
       fs.rmSync(temporaryRoot, { recursive: true, force: true });
