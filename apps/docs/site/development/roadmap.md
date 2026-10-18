@@ -1,6 +1,6 @@
 # Polaris 2026 Q4 路线图
 
-版本号：V1.7.0
+版本号：V1.8.0
 
 | 版本   | 时间       | 修订人    | 备注                                |
 |--------|-----------|-----------|-------------------------------------|
@@ -12,10 +12,11 @@
 | V1.5.0 | 2026/10/17 | opencode | 依据 PRD V2.3.0 新增切片 D3（LLM 调用运行时 CLH 基础设施），插队 M2 前；M2 改为薄工具跑在 CLH 上 |
 | V1.6.0 | 2026/10/17 | opencode | 依据 PRD V2.4.0 新增切片 D4（pack 自含：pack-local tools + 完整安装），M2 后执行；M2/2b 对账翻绿 |
 | V1.7.0 | 2026/10/17 | opencode | 依据 PRD V2.5.0 新增切片 D5（CLH 硬化：流式 + 退避 + per-preset timeoutMs + 错误值贯通）——首次 CVE 对比跑实证四缺陷；R 对账翻绿 |
+| V1.8.0 | 2026/10/18 | opencode | 依据 PRD V2.6.0 新增切片 D6（定价目录 + 预算 fail-closed）——二次对比跑实证预算帽静默失效；D5 对账翻绿 |
 
 周期：2026/10/19 ~ 2026/11/27（6 周，3 个迭代）。
 负责人：Qiang Liu（单人维护）。
-依据：[Polaris PRD](./prd) V2.5.0（唯一 ground truth）。
+依据：[Polaris PRD](./prd) V2.6.0（唯一 ground truth）。
 
 ---
 
@@ -68,7 +69,8 @@ Backbone（用户旅程："一个工作流领域从想法到长期运行"）：
 | 2 模块工具转绿（PRD 3.11） | 声明/接入/提交/执行/产物 | 四模块注册后 pack list 无 warnings，端到端全绿 | 5~7 人天 | 已完成（2026/10/17 提前交付，90fcf6df：四薄工具跑在 CLH 上） |
 | D4 pack 自含（PRD 3.11.8） | 声明/接入/执行（分发面） | cve 四工具移入 pack 本地 `tools/`；解析 pack 本地优先全局兜底；安装物含 tools/+harness/；移除 pack 一并移除本地工具；autoresearch 不回归 | 1~2 人天 | 已完成（2026/10/17 提前交付，c931ac89） |
 | R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 已完成（2026/10/17 提前交付，6d22d71d） |
-| D5 CLH 硬化（PRD 3.14 V2.5.0） | 接入/执行/追溯 | api 后端流式（分钟级长生成完整产出）；429/瞬态退避有界重试；per-preset timeoutMs 进 preset 且 env 兜底；步失败错误值进 run 记录；重跑 CVE-2024-4340 全流程过 build-knowledge | 1~2 人天 | 未开始（CVE 对比跑实证四缺陷，R 后执行） |
+| D5 CLH 硬化（PRD 3.14 V2.5.0） | 接入/执行/追溯 | api 后端流式（分钟级长生成完整产出）；429/瞬态退避有界重试；per-preset timeoutMs 进 preset 且 env 兜底；步失败错误值进 run 记录；重跑 CVE-2024-4340 全流程过 build-knowledge | 1~2 人天 | 已完成（2026/10/17 提前交付；重跑 6 步全绿，verified=true + flag） |
+| D6 定价目录与预算 fail-closed（PRD 3.14.8） | 接入/执行/追溯 | 内置官价目录（family → per-MTok，source+as-of）；env > 目录 > 无；预算声明 + 定价不可解析 → run 启动前 `CLH_PRICING_UNRESOLVED`；缓存读计入口径；重跑验证预算帽真实累计 | ~1 人天 | 未开始（二次对比跑实证预算静默失效） |
 | 3 隔离执行（PRD 3.8/3.9，可选） | 接入/执行/恢复 | 污染断言通过；干净重试可测 | 3~5 人天 | 移出本周期 |
 | 4 丰满层（远期） | live UX/性能基线 | — | — | 远期 |
 
@@ -100,7 +102,8 @@ gantt
     切片 D4 pack 自含（pack-local tools + 完整安装） :done, b2, 2026-10-17, 1d
     section 报告
     切片 R 报告深度与护栏 :done, r1, 2026-10-17, 1d
-    切片 D5 CLH 硬化（流式 + 退避 + per-preset timeout） :c1, 2026-10-17, 1d
+    切片 D5 CLH 硬化（流式 + 退避 + per-preset timeout） :done, c1, 2026-10-17, 1d
+    切片 D6 定价目录与预算 fail-closed :c2, 2026-10-18, 1d
     section 里程碑
     M1 LLM 步骤可依赖 :milestone, m1, 2026-10-16, 0d
     M-D DSL v2 结构化编排 :milestone, md, 2026-10-16, 0d
@@ -109,7 +112,8 @@ gantt
     M2 模块工具转绿 :milestone, m2, 2026-10-17, 0d
     M-D4 pack 自含 :milestone, md4, 2026-10-17, 0d
     M-R 报告深度与护栏 :milestone, mr, 2026-10-17, 0d
-    M-D5 CLH 硬化 :milestone, md5, 2026-10-18, 0d
+    M-D5 CLH 硬化 :milestone, md5, 2026-10-17, 0d
+    M-D6 定价贯通 :milestone, md6, 2026-10-18, 0d
 ```
 
 > M3（可信隔离执行，可选项）移出本周期，连同切片 3 推迟到下一
@@ -134,7 +138,8 @@ gantt
 | M-D3 CLH 基础设施 | W3 2026/11/06 | `packages/llm-harness`（preset schema + compiler + wrapper + api 后端 + dispatcher seam）、8 份 preset（CVE-Genie 映射，prompts Apache-2.0 注明出处）、合成 fixture 测试 | 北极星：模块工具零手写 LLM 调用逻辑；护栏：凭据缺失 fail-closed，既有测试零回归 | 🟢 2026/10/17 提前交付（eaad6ebd；llm-harness 43/43 + 既有 26/31 零回归，8 preset 编译 8/8） |
 | M2 模块工具转绿 | W5 2026/11/20 | cve.processor/builder/exploiter/verifier 四模块工具（薄工具跑在 CLH 上）、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7/3.14.4） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🟢 2026/10/17 提前交付（90fcf6df；39 新测试 + 既有 26/31 零回归，domain-packs 12/12） |
 | M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | 2026/10/17（提前） | R-1 final 前置护栏（registry gate 进 reviews + 0-claims 评 degraded + 排查指引）；R-2 深度门槛（第五评审维 + 字数/段落软门槛）；R-3 provenance（digest/re-run command/回写）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：final 仅在检查通过时可达 | 🟢 2026/10/17 提前交付（6d22d71d；35/35 Python + 6 新守卫测试 + 既有 26/31/14 零回归） |
-| M-D5 CLH 硬化 | W1 2026/10/18 | api 后端流式（SSE）、429/瞬态有界退避、per-preset timeoutMs（preset > env 兜底）、步失败错误值贯通；CVE-2024-4340 对比跑重跑过 build-knowledge（PRD 3.14 V2.5.0） | 北极星：LLM 调用在真实网关下可依赖；护栏：既有 43/43 CLH 测试零回归 | 🔵 |
+| M-D5 CLH 硬化 | W1 2026/10/18 | api 后端流式（SSE）、429/瞬态有界退避、per-preset timeoutMs（preset > env 兜底）、步失败错误值贯通；CVE-2024-4340 对比跑重跑过 build-knowledge（PRD 3.14 V2.5.0） | 北极星：LLM 调用在真实网关下可依赖；护栏：既有 43/43 CLH 测试零回归 | 🟢 2026/10/17 提前交付（重跑全流程 6 步全绿：verified=true + flag，流式/退避/错误值贯通实战验证） |
+| M-D6 定价贯通 | W1 2026/10/18 | 内置官价目录（family → per-MTok input/cached/output，source+as-of）、env > 目录 > 无、预算声明 + 定价不可解析 → `CLH_PRICING_UNRESOLVED`、缓存读计入口径（PRD 3.14.8） | 北极星：预算帽真实生效（CVE 重跑可见 costUsd 累计）；护栏：无预算声明时行为不变 | 🔵 |
 | M-D4 pack 自含 | 2026/10/17（提前） | cve 四工具移入 pack 本地 `tools/`、解析 pack 本地优先全局兜底、安装物含 `tools/`+`harness/`、移除 pack 一并移除本地工具（PRD 3.11.8） | 北极星：复现不再膨胀全局 `tools/`；护栏：autoresearch 既有 pack 安装/运行不回归 | 🟢 2026/10/17 提前交付（c931ac89；39+4 新测试 + 既有 26/31/14 零回归，autoresearch 零触碰） |
 
 ---
