@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V2.4.0
+版本号：V2.5.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -18,6 +18,7 @@
 | V2.2.0 | 2026/10/16 | opencode | 3.10.9 补第三层：flow 级 `budgetUsd`/`timeoutMs` 进 `.ord` 文法，pack 自行声明论文 per-CVE 帽；host 侧 flow 声明 > env |
 | V2.3.0 | 2026/10/17 | opencode | 新增 3.14 LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam，dsh 打头后端，本体论 LLM 原语 vs harness）；3.10.9 补 run 级 maxRuns（run 重试计数，论文 baseline 5） |
 | V2.4.0 | 2026/10/17 | opencode | 新增 3.11.8 pack 自含性：领域特有工具随 pack 分发（pack-local tools + 完整安装）；能力归属裁决——CLH 全局（packages/llm-harness）、论文复现工具 pack 特有、autoresearch 既有全局不动 |
+| V2.5.0 | 2026/10/17 | opencode | 3.14 硬化（CVE 对比跑实证四缺陷）：preset schema 补 per-preset `timeoutMs`；api 后端改流式（长生成不被网关掐断）；call 级 429/瞬态退避进 3.14.4（attempt 内收敛，CLH 拥有）；步失败错误值贯通 |
 
 ---
 
@@ -1014,12 +1015,13 @@ while 不设静态迭代上限（放弃静态终止检查）；止损归平台�
 | loopCap | Number | 会话内迭代上限（attempt 内收敛，如参考实现的 60） |
 | outputContract | Enum | precise-json / artifact（工件存在性 + 判据） |
 | permission | Enum | 会话沙箱权限：read-only / workspace-write（后端语义） |
+| timeoutMs | Number | 每 preset 调用超时（api 后端每 call / dsh 会话整体）；未声明用 env 兜底；缺省 fail-closed 于超时即止（V2.5.0：实证 120s env 默认对真实生成太短，pack 需自声明） |
 
 #### 3.14.3 kind 与后端绑定
 
 | kind | 语义 | 后端 |
 |------|------|------|
-| api | 纯 LLM 调用（无工具无循环） | 直连 OpenAI 兼容 endpoint（零 harness 依赖） |
+| api | 纯 LLM 调用（无工具无循环） | 直连 OpenAI 兼容 endpoint（零 harness 依赖），**流式（SSE）**——非流式长生成会被网关/网络在分钟级掐断（V2.5.0 实证：同一调用非流式 ~5 分钟断连，流式完整产出） |
 | bounded | 只读变换（输入不可变 + 精确输出） | harness 引擎（dsh 打头，read-only 沙箱） |
 | open | 可写执行（工作区即操作对象） | harness 引擎（dsh 打头，workspace-write） |
 
@@ -1034,7 +1036,9 @@ compiler 层隔离（preset 不动，换后端重编译）。选择规则：单 
    preset 挂成 harness 引擎的 subagent——编排权不交给引擎；
 2. **循环内 vs 跨 attempt**：引擎内建的调用重试/迭代上限 = attempt
    内（合法，不重建）；跨 attempt 重试/timeout/budget = 3.10 在
-   CLH 外层承担；
+   CLH 外层承担；call 级退避（429/瞬态断连，指数退避有界重试）=
+   attempt 内收敛，CLH 拥有——一次性失败 fail-closed 不是退避
+   （V2.5.0：实证网关串行限额与分钟级断连，无退避即步失败）；
 3. **回执**：一次会话 = 一个平台 attempt，会话日志解析为一条回执
    进时间线（M1 语义）；循环细节以日志路径引用，不逐次拆回执；
 4. **凭据**：endpoint/key 经 env 注入，进程环境沙箱 scrub，不入库
@@ -1148,6 +1152,7 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | 预算层级 | run 级预算超帽即止损整个运行（跨 parallel 分支累计可测）；`.ord` 步级 `maxAttempts <n>` 与 flow 级 `budgetUsd`/`timeoutMs` 被 parser 接受，flow 声明 > env 兜底 | P0 |
 | maxRuns | run 失败后自动重跑（全新环境，3.8 生效时），最多 n 次；默认 1 行为不变；超限错误码 `run-retries-exhausted` | P1 |
 | CLH | 非法 preset 被拒绝；compiler 产物对后端 schema 校验通过；wrapper 解析会话日志产出回执（costUsd/tokens）；api 后端单 call 含计费回读；凭据缺失 fail-closed | P0 |
+| CLH 硬化 | api 后端流式（分钟级长生成不被网关掐断）；429/瞬态退避有界重试（call 级，attempt 内）；per-preset `timeoutMs` 被接受且 env 兜底；步失败错误值进 run 记录 | P0 |
 | pack 自含 | pack 本地工具解析优先于全局 `tools/`；安装物含 `tools/` 与 `harness/`；移除 pack 一并移除其本地工具；autoresearch 既有 pack 安装/运行不回归 | P0 |
 
 ---
