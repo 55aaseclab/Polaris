@@ -1,6 +1,6 @@
 # Polaris 产品需求文档（PRD）
 
-版本号：V2.5.0
+版本号：V2.6.0
 
 | 版本   | 时间       | 修订人 | 备注                          |
 |--------|-----------|--------|-------------------------------|
@@ -19,6 +19,7 @@
 | V2.3.0 | 2026/10/17 | opencode | 新增 3.14 LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam，dsh 打头后端，本体论 LLM 原语 vs harness）；3.10.9 补 run 级 maxRuns（run 重试计数，论文 baseline 5） |
 | V2.4.0 | 2026/10/17 | opencode | 新增 3.11.8 pack 自含性：领域特有工具随 pack 分发（pack-local tools + 完整安装）；能力归属裁决——CLH 全局（packages/llm-harness）、论文复现工具 pack 特有、autoresearch 既有全局不动 |
 | V2.5.0 | 2026/10/17 | opencode | 3.14 硬化（CVE 对比跑实证四缺陷）：preset schema 补 per-preset `timeoutMs`；api 后端改流式（长生成不被网关掐断）；call 级 429/瞬态退避进 3.14.4（attempt 内收敛，CLH 拥有）；步失败错误值贯通 |
+| V2.6.0 | 2026/10/18 | opencode | 裁决（CVE 对比跑二次实证：预算帽静默失效）：内置官方定价目录（family → per-MTok，env 覆盖 > 目录 > 无）；flow/run 预算声明时定价不可解析即 fail-closed（稳定码），绝不静默零累计——解决 3.11.4 [待确认]，不做估算 |
 
 ---
 
@@ -843,8 +844,9 @@ input:{...uses}}`；非零退出即步失败（fail-closed）。
   scrub，不继承宿主凭据；
 - 凭据缺失时模块 fail-closed：返回非零退出并注明
   "LLM provider 不可用"，交由 3.10 步级策略处理；
-- costUsd 口径：优先回读 CLH wrapper（3.14）的计费输出；无计费
-  输出时按固定估算计入回执 [待确认]；
+- costUsd 口径：优先回读 CLH wrapper（3.14）的计费输出；定价按
+  3.14.8（内置目录 + env 覆盖）解析；预算声明时定价不可解析即
+  fail-closed（V2.6.0），无估算 fallback；
 - 公开参考实现（如 CVE-Genie）仅作方法与 prompt 对照，自带基础
   设施不移植（能力归属见 3.11.7）。
 
@@ -1049,6 +1051,19 @@ open kind 的命令执行经插件机制替换为 dispatcher adapter（命令走
 dispatcher 协议）；3.8 隔离执行器落地后 dispatcher 指向隔离环境，
 seam 不变。镜像参考实现的 SSH toolbox 模式。
 
+#### 3.14.8 定价目录与预算贯通（V2.6.0 裁决）
+
+实证：CVE-2024-4340 对比跑中 costUsd 不可解析（无定价）→
+`stepBudgetSpentUsd` 永不累计 → flow 级 `budgetUsd 5.0` 全程未生效
+（~270 万 tokens 成本对预算机制不可见）。
+
+| 规则 | 内容 |
+|------|------|
+| 内置定价目录 | CLH 随包内置模型家族官价表（family 前缀匹配 → per-MTok input/cached-input/output），每条带 source URL 与 as-of 日期；价目是数据不是代码，更新走 PR 外科式替换 |
+| 解析顺序 | env 覆盖（`POLARIS_CLH_*_PRICE_*`）> 内置目录 > 无 |
+| fail-closed | flow/run 预算已声明 且 任一在用 preset 的模型定价不可解析 → run 启动前拒绝，稳定码 `CLH_PRICING_UNRESOLVED`；**绝不静默零累计**（解决 3.11.4 [待确认]，不做估算） |
+| 计费口径 | costUsd = input×p_in + cached×p_cached + output×p_out（缓存读计入，目录提供 cached 价）；无目录条目且无 env → 不可解析 |
+
 #### 3.14.6 用户故事
 ```
 作为模块工具作者，我希望按 preset 声明 LLM 调用（kind/模型/边界/
@@ -1153,6 +1168,7 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | maxRuns | run 失败后自动重跑（全新环境，3.8 生效时），最多 n 次；默认 1 行为不变；超限错误码 `run-retries-exhausted` | P1 |
 | CLH | 非法 preset 被拒绝；compiler 产物对后端 schema 校验通过；wrapper 解析会话日志产出回执（costUsd/tokens）；api 后端单 call 含计费回读；凭据缺失 fail-closed | P0 |
 | CLH 硬化 | api 后端流式（分钟级长生成不被网关掐断）；429/瞬态退避有界重试（call 级，attempt 内）；per-preset `timeoutMs` 被接受且 env 兜底；步失败错误值进 run 记录 | P0 |
+| 定价贯通 | 预算声明 + 定价不可解析 → run 启动前 fail-closed（`CLH_PRICING_UNRESOLVED`）；内置目录命中的模型在无 env 时 costUsd 可解析且含缓存读口径 | P0 |
 | pack 自含 | pack 本地工具解析优先于全局 `tools/`；安装物含 `tools/` 与 `harness/`；移除 pack 一并移除其本地工具；autoresearch 既有 pack 安装/运行不回归 | P0 |
 
 ---
