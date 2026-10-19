@@ -80,6 +80,9 @@ export interface ProgramFlowMeta {
   /** PRD 3.10.9 flow-level budget declaration; the host enforces flow > env. */
   budgetUsd?: number
   timeoutMs?: number
+  /** PRD 3.10.9 run-level attempt count; the host reruns a failed flow up
+   * to this many whole-run attempts (default 1). */
+  maxRuns?: number
 }
 
 export interface CompiledFlowHandler {
@@ -190,6 +193,7 @@ export function toMeta(flow: FlowAst): ProgramFlowMeta {
     ],
     ...(flow.budgetUsd !== undefined ? { budgetUsd: flow.budgetUsd } : {}),
     ...(flow.timeoutMs !== undefined ? { timeoutMs: flow.timeoutMs } : {}),
+    ...(flow.maxRuns !== undefined ? { maxRuns: flow.maxRuns } : {}),
   }
 }
 

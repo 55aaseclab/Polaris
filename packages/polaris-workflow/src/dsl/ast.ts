@@ -252,6 +252,10 @@ export interface FlowAst {
    * flow > env as the run-level caps for the flow's steps. */
   budgetUsd?: number
   timeoutMs?: number
+  /** DSL run-level retry declaration (PRD 3.10.9): after a failed run the
+   * host reruns the whole flow (fresh run-attempt, no step skipping), at
+   * most maxRuns attempts total. Default 1 keeps single-run behavior. */
+  maxRuns?: number
   /** port 能力需求（可带 @version） */
   needs: PortRef[]
   inputs: InputFieldAst[]

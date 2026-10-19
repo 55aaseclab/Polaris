@@ -9,6 +9,7 @@ import type {
   FfiRpcRequest,
   FfiRpcResponse,
   PortAst,
+  RunResult,
 } from "polaris-workflow";
 import {
   builtinCallForPort,
@@ -358,6 +359,7 @@ const RUN_POLICY_TIMEOUT_MS_ENV = "POLARIS_RUN_TIMEOUT_MS";
 /** PRD 3.10.9 run-level verdict codes; the Portal i18n map localizes them. */
 const RUN_BUDGET_EXCEEDED_CODE = "run-budget-exceeded";
 const RUN_TIMEOUT_EXCEEDED_CODE = "run-timeout-exceeded";
+const RUN_RETRIES_EXHAUSTED_CODE = "run-retries-exhausted";
 
 /** Run-wide budget/timeout caps; an omitted cap means enforcement is off. */
 type WorkflowRunPolicy = {
@@ -377,6 +379,14 @@ function readRunPolicy(
     ...(budgetUsd !== undefined ? { budgetUsd } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs: Math.floor(timeoutMs) } : {}),
   };
+}
+
+/** PRD 3.10.9 run-level maxRuns: the flow header's whole-run attempt count.
+ * Absent or invalid declarations fall back to 1 (single round, current
+ * behavior); fractional values floor because attempts are whole runs. */
+function readRunMaxRuns(value: unknown): number {
+  const parsed = readOptionalNumber(value, 1);
+  return parsed === undefined ? 1 : Math.max(1, Math.floor(parsed));
 }
 
 /** Mechanical step-detail text for a run-level stop (code + values, no prose). */
@@ -2049,6 +2059,9 @@ export class WorkflowControlService {
     // unresolvable (no env override, no catalog entry), the run fails closed
     // before its first step instead of silently spending past the cap.
     const gateFlow = program.flows.find((candidate) => candidate.meta.name === run.flowId);
+    // PRD 3.10.9: the flow header's maxRuns declares how many whole-run
+    // attempts the host makes; default 1 keeps single-round behavior.
+    const maxRuns = readRunMaxRuns(gateFlow?.meta.maxRuns);
     const gatePolicy = readRunPolicy(
       process.env,
       gateFlow ? { budgetUsd: gateFlow.meta.budgetUsd, timeoutMs: gateFlow.meta.timeoutMs } : undefined,
@@ -2077,36 +2090,56 @@ export class WorkflowControlService {
       importMetaUrl: this.options.importMetaUrl,
       liveMetadataReader: this.options.liveMetadataReader,
     });
-    const docStore = new DocStore();
     const heartbeat = setInterval(() => {
       this.store.heartbeatWorkflowRun(run.id, this.workerId);
     }, 15_000);
     heartbeat.unref();
-    let result;
+    // PRD 3.10.9 run-level maxRuns: a failed run reruns as a whole — every
+    // round is a fresh runAsync with a fresh doc context (products redo from
+    // zero, no step skipping) while the shared host keeps the flow budget
+    // cap cumulative and the run wall clock running across rounds. A tripped
+    // run-wide cap is shared too, so it ends the loop instead of retrying.
+    const rounds: Array<{ result: RunResult; attempt: number }> = [];
     try {
-      result = await program.runAsync(run.flowId, run.input, docStore, host);
+      for (let attempt = 1; ; attempt += 1) {
+        const roundResult = await program.runAsync(run.flowId, run.input, new DocStore(), host);
+        rounds.push({ result: roundResult, attempt });
+        if (roundResult.ok) break;
+        if (host.runStopVerdict()) break;
+        if (attempt >= maxRuns) break;
+        if (this.store.getWorkflowRun(run.tenantId, run.id)?.status === "cancelled") break;
+      }
     } finally {
       clearInterval(heartbeat);
     }
+    const result = rounds[rounds.length - 1]!.result;
     const completedAt = this.now().toISOString();
-    for (const [index, step] of result.stepLog.entries()) {
-      this.store.recordWorkflowStepResult({
-        id: `step-${run.id}-${index + 1}`,
-        sequence: index + 1,
-        runId: run.id,
-        tenantId: run.tenantId,
-        stepId: step.id,
-        stepLabel: step.label,
-        status: step.ok ? "completed" : "failed",
-        detail: step.detail ?? "",
-        ...(step.call ? { call: step.call } : {}),
-        input: step.used ?? {},
-        output: step.produced ?? {},
-        outputFields: Object.keys(step.produced ?? {}),
-        ...(step.group ? { group: step.group } : {}),
-        createdAt: completedAt,
-        completedAt,
-      });
+    let stepSequence = 0;
+    for (const round of rounds) {
+      for (const step of round.result.stepLog) {
+        stepSequence += 1;
+        // PRD 3.10.9: retried flows annotate every round's step records with
+        // the run-attempt marker (same style as the step-level attempt
+        // suffix); maxRuns 1 leaves the timeline byte-identical.
+        const roundNote = maxRuns > 1 ? ` (run attempt ${round.attempt}/${maxRuns})` : "";
+        this.store.recordWorkflowStepResult({
+          id: `step-${run.id}-${stepSequence}`,
+          sequence: stepSequence,
+          runId: run.id,
+          tenantId: run.tenantId,
+          stepId: step.id,
+          stepLabel: step.label,
+          status: step.ok ? "completed" : "failed",
+          detail: `${step.detail ?? ""}${roundNote}`,
+          ...(step.call ? { call: step.call } : {}),
+          input: step.used ?? {},
+          output: step.produced ?? {},
+          outputFields: Object.keys(step.produced ?? {}),
+          ...(step.group ? { group: step.group } : {}),
+          createdAt: completedAt,
+          completedAt,
+        });
+      }
     }
     for (const entry of host.rpcLog) {
       if (entry.request.mode === "live") {
@@ -2139,6 +2172,13 @@ export class WorkflowControlService {
       const stop = host.runStopVerdict();
       if (stop) {
         this.fail(run, stop.code, runStopFailureMessage(stop), stop.values ?? undefined);
+        return;
+      }
+      // PRD 3.10.9: every whole-run attempt failed, so the run carries the
+      // stable exhaustion code with the attempt bookkeeping in values.
+      if (maxRuns > 1 && rounds.length >= maxRuns) {
+        const values = { attempts: rounds.length, maxRuns };
+        this.fail(run, RUN_RETRIES_EXHAUSTED_CODE, runStopFailureMessage({ code: RUN_RETRIES_EXHAUSTED_CODE, values }), values);
         return;
       }
       // PRD 3.14: thread the failing step's stable error code/values into the

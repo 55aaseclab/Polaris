@@ -151,6 +151,12 @@ export function validate(ast: DomainAst, toolResolver?: ToolResolver): ValidateR
     if (flow.timeoutMs !== undefined && !(flow.timeoutMs >= 1)) {
       push(issues, 'error', 'E_FLOW_TIMEOUT_MS', `flow ${flow.name} timeoutMs 必须为 >= 1`, `flow.${flow.name}`)
     }
+    // PRD 3.10.9: the run-level attempt count must be a positive integer;
+    // fractional/zero/negative declarations would make the retry loop
+    // meaningless or unbounded.
+    if (flow.maxRuns !== undefined && !(Number.isInteger(flow.maxRuns) && flow.maxRuns >= 1)) {
+      push(issues, 'error', 'E_FLOW_MAX_RUNS', `flow ${flow.name} maxRuns 必须为 >= 1 的整数`, `flow.${flow.name}`)
+    }
     if (flow.require) checkRequireExpr(flow.require.expr, allStatusValues, issues, flow.name)
 
     for (const n of flow.needs ?? []) {

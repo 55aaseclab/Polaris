@@ -393,3 +393,27 @@ test("flow-level budget sanity checks reject negative budget and non-positive ti
   assert.equal(zeroTimeout.ok, false);
   assert.ok(zeroTimeout.issues.some((issue) => issue.code === "E_FLOW_TIMEOUT_MS"));
 });
+
+test("flow-level maxRuns parses into the flow header (PRD 3.10.9)", () => {
+  const pipeline = runPipeline(flowCapSource("maxRuns 5"));
+  assert.equal(pipeline.ok, true);
+  const flow = pipeline.ast?.flows[0];
+  assert.equal(flow?.maxRuns, 5);
+  assert.equal(pipeline.program?.flows[0]?.meta.maxRuns, 5);
+
+  const bare = runPipeline(flowCapSource(""));
+  assert.equal(bare.ok, true);
+  assert.equal(bare.ast?.flows[0]?.maxRuns, undefined);
+  assert.equal(bare.program?.flows[0]?.meta.maxRuns, undefined);
+});
+
+test("flow-level maxRuns sanity checks reject zero, negative, and fractional values", () => {
+  for (const declaration of ["maxRuns 0", "maxRuns -3", "maxRuns 1.5"]) {
+    const result = runPipeline(flowCapSource(declaration));
+    assert.equal(result.ok, false, declaration);
+    assert.ok(
+      result.issues.some((issue) => issue.code === "E_FLOW_MAX_RUNS"),
+      `${declaration} must raise E_FLOW_MAX_RUNS`,
+    );
+  }
+});

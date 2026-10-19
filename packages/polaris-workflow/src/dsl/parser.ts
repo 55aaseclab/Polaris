@@ -168,6 +168,11 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
   const timeoutMs = flowTimeoutM && Number.isFinite(Number(flowTimeoutM[1]))
     ? Math.round(Number(flowTimeoutM[1]))
     : undefined
+  // PRD 3.10.9: flow-level run-attempt count as a header part; non-finite
+  // values are skipped like the other header numbers, sanity lives in the
+  // validator (positive integer).
+  const maxRunsM = header.match(/\bmaxRuns\s+(\S+)/i)
+  const maxRuns = maxRunsM && Number.isFinite(Number(maxRunsM[1])) ? Number(maxRunsM[1]) : undefined
   const inputs: InputFieldAst[] = []
   const outputs: FlowOutputAst[] = []
   const needs: PortRef[] = []
@@ -281,6 +286,7 @@ function parseFlow(header: string, body: string): FlowAst | ParseError {
     create,
     ...(budgetUsd !== undefined ? { budgetUsd } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(maxRuns !== undefined ? { maxRuns } : {}),
     needs,
     inputs,
     outputs,
