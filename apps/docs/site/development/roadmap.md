@@ -1,6 +1,6 @@
 # Polaris 2026 Q4 Roadmap
 
-Version: V1.9.0
+Version: V2.0.0
 
 | Version | Date       | Author    | Notes |
 |---------|-----------|-----------|-------|
@@ -14,10 +14,11 @@ Version: V1.9.0
 | V1.7.0 | 2026/10/17 | opencode | Added slice D5 (CLH hardening: streaming + backoff + per-preset timeoutMs + error-value threading) per PRD V2.5.0 — first CVE comparison run proved four defects; R reconciled green |
 | V1.8.0 | 2026/10/18 | opencode | Added slice D6 (pricing catalog + budget fail-closed) per PRD V2.6.0 — second comparison run proved the budget cap silently inert; D5 reconciled green |
 | V1.9.0 | 2026/10/18 | opencode | Added slice D7 (run-level maxRuns — run retry count) per PRD 3.10.9; evaluation calibration (1 CVE × 3 runs) starts; version 0.5.0 released |
+| V2.0.0 | 2026/10/19 | opencode | Added slice P (observability panel — cost / reliability / quality / evaluation views) per PRD V3.0.0's third pillar, next window's main piece alongside 3.8; D7 reconciled pending review |
 
 Cycle: 2026/10/19 ~ 2026/11/27 (6 weeks, 3 iterations).
 Owner: Qiang Liu (solo maintainer).
-Basis: [Polaris PRD](./prd) V2.6.0 (sole ground truth).
+Basis: [Polaris PRD](./prd) V3.0.0 (sole ground truth).
 
 ---
 
@@ -75,7 +76,8 @@ verifiable, never a vertical cut through a single module.
 | R report depth and guardrails (PRD 3.12) | Analysis / report / review | Empty registry no longer passes hollow; final report length distinguishable; provenance reproducible | ≈ 3.5 person-days | Done (delivered early 2026/10/17, 6d22d71d) |
 | D5 CLH hardening (PRD 3.14 V2.5.0) | Integrate / execute / trace | api backend streams (minute-scale long generations complete); 429/transient bounded backoff; per-preset timeoutMs in presets with env fallback; step-failure error values enter the run record; the CVE-2024-4340 rerun passes build-knowledge end to end | 1~2 person-days | Done (delivered early 2026/10/17; rerun all 6 steps green, verified=true + flag) |
 | D6 pricing catalog and budget fail-closed (PRD 3.14.8) | Integrate / execute / trace | Built-in official price catalog (family → per-MTok, source+as-of); env > catalog > none; declared budget + unresolvable pricing → `CLH_PRICING_UNRESOLVED`; cached reads counted in billing; the rerun verifies the budget cap truly accrues | ~1 person-day | Done (delivered early 2026/10/18; live run costUsd ≈$1.11 accrued + verified=true) |
-| D7 run-level maxRuns (PRD 3.10.9) | Execute / recover | Flow-level `maxRuns <n>` enters the `.ord` grammar; after a run fails the whole run reruns (default 1 behavior unchanged; a brand-new environment each round when 3.8 is active); over-limit `run-retries-exhausted`; the rerun verifies retry rescue | ~0.5 person-day | Not started (step-level retry proven to rescue in production; run-level completes the same family) |
+| D7 run-level maxRuns (PRD 3.10.9) | Execute / recover | Flow-level `maxRuns <n>` enters the `.ord` grammar; after a run fails the whole run reruns (default 1 behavior unchanged; a brand-new environment each round when 3.8 is active); over-limit `run-retries-exhausted`; the rerun verifies retry rescue | ~0.5 person-day | Delivered in the working tree (pending review; the live eval run's round-1 setup failure was rescued by the run-level retry) |
+| P observability panel (PRD 3.15) | Full chain (evidence → decisions) | Four views (cost vs budget cap with cached-read share; reliability with success/rescue rates and a failure taxonomy; PoC quality rubric; cross-run evaluation) render from existing tables; role scoping respected | 3~5 person-days | Not started (next window's main piece, alongside 3.8) |
 | 3 isolated execution (PRD 3.8/3.9, optional) | Integrate / execute / recover | Pollution assertion passes; clean retry measurable | 3~5 person-days | Moved out of this cycle |
 | 4 flesh-out layer (long term) | live UX / performance baseline | — | — | Long term |
 
@@ -109,7 +111,9 @@ gantt
     Slice R report depth and guardrails :done, r1, 2026-10-17, 1d
     Slice D5 CLH hardening (streaming + backoff + per-preset timeout) :done, c1, 2026-10-17, 1d
     Slice D6 pricing catalog and budget fail-closed :done, c2, 2026-10-18, 1d
-    Slice D7 run-level maxRuns (run retry count) :c3, 2026-10-18, 1d
+    Slice D7 run-level maxRuns (run retry count) :done, c3, 2026-10-18, 1d
+    section Panel
+    Slice P observability panel (four views over existing tables) :p1, 2026-11-16, 5d
     section Milestones
     M1 LLM steps dependable :milestone, m1, 2026-10-16, 0d
     M-D DSL v2 structured orchestration :milestone, md, 2026-10-16, 0d
@@ -121,6 +125,7 @@ gantt
     M-D5 CLH hardening :milestone, md5, 2026-10-17, 0d
     M-D6 pricing threaded through :milestone, md6, 2026-10-18, 0d
     M-D7 run-level maxRuns :milestone, md7, 2026-10-19, 0d
+    M-P observability panel :milestone, mp, 2026-11-20, 0d
 ```
 
 > M3 (trusted isolated execution, optional) moves out of this cycle,
@@ -150,7 +155,8 @@ gantt
 | M-R report depth and guardrails (inserted, occupies slice 3's buffer slot) | 2026/10/17 (early) | R-1 final precondition guardrail (registry gate in reviews + 0-claims reviewed degraded + troubleshooting guidance); R-2 depth gate (fifth review dimension + word/paragraph soft floors); R-3 provenance (digest/re-run command/write-back) — definitions in PRD 3.12 | North star: empty registry no longer passes hollow; guardrail: final reachable only when checks pass | 🟢 Delivered early 2026/10/17 (6d22d71d; 35/35 Python + 6 new guard tests + existing 26/31/14 zero regression) |
 | M-D5 CLH hardening | W1 2026/10/18 | api backend streaming (SSE), 429/transient bounded backoff, per-preset timeoutMs (preset > env fallback), step-failure error-value threading; the CVE-2024-4340 comparison-run rerun passes build-knowledge (PRD 3.14 V2.5.0) | North star: LLM calls dependable under a real gateway; guardrail: existing 43/43 CLH tests zero regression | 🟢 Delivered early 2026/10/17 (rerun full flow all 6 steps green: verified=true + flag, streaming/backoff/error-value threading battle-tested) |
 | M-D6 pricing threaded through | W1 2026/10/18 | Built-in official price catalog (family → per-MTok input/cached/output, source+as-of), env > catalog > none, declared budget + unresolvable pricing → `CLH_PRICING_UNRESOLVED`, cached-read billing (PRD 3.14.8) | North star: budget cap truly effective (the CVE rerun shows costUsd accruing); guardrail: behavior unchanged without a budget declaration | 🟢 Delivered early 2026/10/18 (live run succeeded + verified=true, costUsd ≈$1.11 accrued, cached 556K/857K/661K at catalog prices; 70/70 CLH + 41 cve zero regression) |
-| M-D7 run-level maxRuns | W2 2026/10/19 | Flow-level `maxRuns <n>` grammar + parser/validator + host run retry loop (a fresh attempt record each round), `run-retries-exhausted`, synthetic tests (PRD 3.10.9) | North star: run-level failure recovery measurable; guardrail: default 1 behavior unchanged | 🔵 |
+| M-D7 run-level maxRuns | W2 2026/10/19 | Flow-level `maxRuns <n>` grammar + parser/validator + host run retry loop (a fresh attempt record each round), `run-retries-exhausted`, synthetic tests (PRD 3.10.9) | North star: run-level failure recovery measurable; guardrail: default 1 behavior unchanged | 🔵 Delivered in the working tree, pending review |
+| M-P observability panel | W5 2026/11/20 | Four views (cost vs budget cap with cached-read share; reliability with success/rescue rates and failure taxonomy; PoC quality rubric; cross-run evaluation) over existing tables; role scoping (PRD 3.15) | North star: success rate and rescue rate become measurable and visible; guardrail: no new collection, existing suites zero regression | 🔵 |
 | M-D4 pack self-containment | 2026/10/17 (early) | The four cve tools move into pack-local `tools/`, pack-local-first resolution with global fallback, the install contains `tools/` + `harness/`, removing the pack removes local tools (PRD 3.11.8) | North star: reproduction no longer bloats global `tools/`; guardrail: existing autoresearch pack install/run no regression | 🟢 Delivered early 2026/10/17 (c931ac89; 39+4 new tests + existing 26/31/14 zero regression, autoresearch untouched) |
 
 ---
