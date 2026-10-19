@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
-## [Unreleased]
+## [0.5.0] - 2026-10-18
 
 ### Added
 
