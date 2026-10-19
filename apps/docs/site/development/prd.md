@@ -1,218 +1,235 @@
-# Polaris 产品需求文档（PRD）
+# Polaris Product Requirements Document (PRD)
 
-版本号：V2.6.0
+Version: V2.6.0
 
-| 版本   | 时间       | 修订人 | 备注                          |
-|--------|-----------|--------|-------------------------------|
-| V1.0.0 | 2026/10/16 | opencode | 基于代码库现状整理 |
-| V1.1.0 | 2026/10/16 | opencode | 新增隔离执行器/沙箱 CLI 端口/步级重试需求 |
-| V1.2.0 | 2026/10/16 | opencode | 移入 Development 分区；声明唯一 ground truth；移除固定版本承诺 |
-| V1.3.0 | 2026/10/16 | opencode | 补充试验包契约：四原语沙箱、模块工具 dispatcher 协议、硬约束与验收 |
-| V1.4.0 | 2026/10/16 | opencode | 评审修订：SQLite 现状、幂等键、沙箱边界声明、LLM 依赖口径、产物脱敏、污染断言可执行化 |
-| V1.5.0 | 2026/10/16 | opencode | 裁决：北极星指标对齐替换成本三维；交付顺序改为 3.10 先行、沙箱为可选项 |
-| V1.6.0 | 2026/10/16 | opencode | 新增产物发布护栏（final 门槛/深度门槛/provenance 完整性） |
-| V1.7.0 | 2026/10/16 | opencode | 裁决：重试/预算/超时归步级策略（3.10）；模块工具只做单次尝试，不重复实现 attempt 循环 |
-| V1.8.0 | 2026/10/16 | opencode | 裁决推广：平台横切能力（重试/隔离/回执/审计/编排/传递）工具一律不重复实现；新增 3.11.7 能力归属对照 |
-| V2.0.0 | 2026/10/16 | opencode | DSL v2：`.ord` 升级为结构化编排（六构造，无界 while + 预算兜底）；移除"线性 DAG"约束；插队 M2 前 |
-| V2.1.0 | 2026/10/16 | opencode | 新增 3.10.9 预算层级 gap 修复：run 级预算帽（论文 per-CVE $5/45min 口径）+ 步级 maxAttempts 进 `.ord` 文法；插队 M2 前 |
-| V2.2.0 | 2026/10/16 | opencode | 3.10.9 补第三层：flow 级 `budgetUsd`/`timeoutMs` 进 `.ord` 文法，pack 自行声明论文 per-CVE 帽；host 侧 flow 声明 > env |
-| V2.3.0 | 2026/10/17 | opencode | 新增 3.14 LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam，dsh 打头后端，本体论 LLM 原语 vs harness）；3.10.9 补 run 级 maxRuns（run 重试计数，论文 baseline 5） |
-| V2.4.0 | 2026/10/17 | opencode | 新增 3.11.8 pack 自含性：领域特有工具随 pack 分发（pack-local tools + 完整安装）；能力归属裁决——CLH 全局（packages/llm-harness）、论文复现工具 pack 特有、autoresearch 既有全局不动 |
-| V2.5.0 | 2026/10/17 | opencode | 3.14 硬化（CVE 对比跑实证四缺陷）：preset schema 补 per-preset `timeoutMs`；api 后端改流式（长生成不被网关掐断）；call 级 429/瞬态退避进 3.14.4（attempt 内收敛，CLH 拥有）；步失败错误值贯通 |
-| V2.6.0 | 2026/10/18 | opencode | 裁决（CVE 对比跑二次实证：预算帽静默失效）：内置官方定价目录（family → per-MTok，env 覆盖 > 目录 > 无）；flow/run 预算声明时定价不可解析即 fail-closed（稳定码），绝不静默零累计——解决 3.11.4 [待确认]，不做估算 |
-
----
-
-## 一、概述（为什么做）
-
-### 1.1 产品概述及目标
-
-#### 1.1.1 背景介绍
-
-多智能体（multi-agent）系统正在成为团队的核心生产力工具，但把它交给
-真实业务运行时，团队普遍缺少一个统一的控制平面：
-
-- 把某个领域直接硬编码进产品，无法规模化复用；
-- 把每个步骤写成命令和参数列表，领域包会退化成一个 shell 脚本，
-  后续步骤无法校验输入，也没有"某一步允许触碰什么"的记录；
-- 运行没有回执（receipt）和产物（artifact）留存，出错无法追溯；
-- 身份、配额、生命周期、审计散落在各处，权限边界模糊。
-
-Polaris 的答案是：用一门 DSL + 领域包（Domain Pack）承载"工作是什么"，
-用一个自托管控制平面承载"谁能运行、如何运行、留什么证据"。
-
-> 需求体检备注：本文档是 Polaris 产品的唯一 ground truth——范围、
-> 流程、优先级以本文档为准，与其他文档冲突时以本文档为准；
-> 不以固定版本号承诺交付。用户证据与量化成功指标缺失，已列入
-> 「待确认项清单」首条。
-
-#### 1.1.2 产品概述
-
-Polaris 是面向隔离多智能体系统的自托管控制平面。用户通过 Portal
-（浏览器应用）或 REST API 提交工作流运行；Polaris 引擎负责
-解析、校验、编译领域包，执行准入（admission）、发放租约（lease）、
-排队调度，并留存每一步的回执与产物。
-
-#### 1.1.3 产品目标
-
-北极星三指标，映射替换成本三维（学习/迁移/信任）——产品的价值 =
-把新工作流领域的采纳成本降下来。
-
-**业务目标**
-
-| 目标 | 指标 | 目标值 | 达成时间 |
-|------|------|--------|---------|
-| 降低学习成本（北极星 1） | 新领域接入人日：从领域想法到 pack 转绿可执行 | 实测基线后定 [待确认]，方向：单调下降 | 持续 |
-| 降低迁移成本（北极星 2） | 运行成功率：succeeded / 终态运行 | ≥ 90% [待确认]；旧方案基线：脚本崩了全重跑 | 持续 |
-| 降低迁移成本（北极星 2） | 重试救回率：重试后最终成功 / 曾失败 | 实测基线后定 [待确认] | 持续 |
-| 降低信任成本（北极星 3） | 追溯完整率：终态运行可回答"谁、何时、哪个版本、输入输出" | 100% | 已达成 |
-| 权限最小化 | 执行者只能运行已钉住的定义且持有效租约 | 100% 强制 | 已达成 |
-
-**用户目标**
-
-| 目标用户 | 用户目标 | 衡量指标 |
-|---------|---------|---------|
-| 领域专家（打包者） | 新领域只写 pack + 工具，不学产品内部 | 新领域接入人日（北极星 1） |
-| 提交者 | 偶发失败不拖垮运行，看到实时进度和产物 | 运行成功率 / 重试救回率（北极星 2）；时间线更新 |
-| 审批者 | 在人工门禁处一键处理，操作留痕 | waiting → running 转换；审计完整 |
-| 平台运维 | 环境缺口一次预检可见 | `ops tool-precheck` 必需项全绿 |
-
-#### 1.1.4 目标用户
-
-| 角色 | 描述 | 核心诉求 |
-|------|------|---------|
-| 平台工程师/运维 | 部署并维护 Polaris、管理领域包 | 部署简单、预检清晰、可恢复 |
-| 领域专家（打包者） | 用 DSL 把某领域封装为 Pack | 表达力够、版本可管理 |
-| 提交者/执行者 | 提交运行、在租约内执行定义 | 进度透明、产物可取 |
-| 审批者 | 对人工门禁做批准/驳回 | 列表清晰、一键操作、留痕 |
-| 观察者/对账者 | 查看证据、检查回执与失败 | 只读、范围受控 |
-
-### 1.2 名词说明
-
-| 名词 | 说明 |
-|------|------|
-| DSL | 描述"工作是什么、数据如何流动、允许使用哪些能力"的语言 |
-| Domain Pack（领域包） | 一个版本化的领域：实体、流程（flow）、端口（port）、标签 |
-| `.ord` | 领域包声明文件；一个 `.ord` 或一个含 `main.ord` 的目录 |
-| Flow / Step | 一条工作流及其步骤 |
-| Port（端口） | 工具 FFI 接口；由 Host 决定由谁实现、如何绑定 |
-| Host worker | 主机侧执行器，接收 `driver=none` 的运行 |
-| Vault | 隔离的运行时环境，`driver=vault` 时在其中执行 |
-| Admission（准入） | 把一次运行请求变为受管运行对象的过程 |
-| Lease（租约） | 执行者运行已钉住定义所需的凭证 |
-| Receipt（回执） | 一步执行完成后的记录凭证 |
-| Artifact（产物） | 运行产生并受控开放的输出文件 |
-| 运行模式 | `mock`（普通 UI 准入）/ `host`（主机执行器）/ `live`（仅运维路径） |
-| Portal | 浏览器端应用（`apps/polaris-portal`），React/Vite |
-| Paseo | 内嵌 daemon，承载具体 agent 会话执行 |
-| Surface / Gateway | 功能入口面 / 私有入口网关，负责准入、票据与限流 |
-
-### 1.3 角色及权限
-
-| 角色 | 权限范围 | 数据范围 |
-|------|---------|---------|
-| observer（观察者） | 读取 Pack 与范围内证据 | 被授权范围 |
-| proposer（提议者） | 创建禁用态草稿 | 本人草稿 |
-| approver（审批者） | 批准/驳回草稿或运行动作 | 范围内运行 |
-| executor（执行者） | 运行已钉住的定义（需当前租约） | 已钉住定义 |
-| reconciler（对账者） | 检查回执与失败 | 范围内运行 |
-| operator（运维，产品外角色） | pack 安装/移除、live 元数据准入、预检 | 全系统 |
-
-> 规则：成员身份不隐含执行权限（Membership does not imply execution）。
-
-### 1.4 文档阅读对象
-
-| 对象 | 关注内容 |
-|------|---------|
-| 研发 | 功能需求、数据字典、系统集成 |
-| UI/UX | Portal 路由与交互、全局规则 |
-| 测试 | 异常流程、验收标准 |
-| 运维 | 版本规划、非功能需求、工具预检 |
+| Version | Date       | Author   | Notes |
+|---------|-----------|----------|-------|
+| V1.0.0 | 2026/10/16 | opencode | Compiled from the current state of the codebase |
+| V1.1.0 | 2026/10/16 | opencode | Added isolation executor / sandbox CLI port / step-level retry requirements |
+| V1.2.0 | 2026/10/16 | opencode | Moved into the Development section; declared the sole ground truth; removed fixed-version delivery commitments |
+| V1.3.0 | 2026/10/16 | opencode | Added the trial pack contract: four-primitive sandbox, module tool dispatcher protocol, hard constraints and acceptance |
+| V1.4.0 | 2026/10/16 | opencode | Review revisions: SQLite status, idempotency key, sandbox boundary statement, LLM dependency stance, artifact redaction, executable pollution assertions |
+| V1.5.0 | 2026/10/16 | opencode | Ruling: north-star metrics aligned to the three switching-cost dimensions; delivery order changed to 3.10 first, sandbox optional |
+| V1.6.0 | 2026/10/16 | opencode | Added artifact release guardrails (final gate / depth gate / provenance completeness) |
+| V1.7.0 | 2026/10/16 | opencode | Ruling: retry/budget/timeout belong to step policy (3.10); module tools do a single attempt and never re-implement the attempt loop |
+| V1.8.0 | 2026/10/16 | opencode | Ruling generalized: platform cross-cutting capabilities (retry / isolation / receipts / audit / orchestration / handoff) are never re-implemented in tools; added the 3.11.7 capability ownership mapping |
+| V2.0.0 | 2026/10/16 | opencode | DSL v2: `.ord` upgraded to structured orchestration (six constructs, unbounded while + budget stop-loss backstop); removed the "linear DAG" constraint; cut ahead of M2 |
+| V2.1.0 | 2026/10/16 | opencode | Added the 3.10.9 budget hierarchy gap fix: run-level budget cap (paper per-CVE $5/45min scale) + step-level maxAttempts into the `.ord` grammar; cut ahead of M2 |
+| V2.2.0 | 2026/10/16 | opencode | 3.10.9 adds a third tier: flow-level `budgetUsd`/`timeoutMs` into the `.ord` grammar, packs declare the paper per-CVE cap themselves; host-side flow declaration > env |
+| V2.3.0 | 2026/10/17 | opencode | Added 3.14 LLM invocation runtime (CLH: preset schema + compiler + wrapper + dispatcher seam, dsh-first backend, LLM-primitive-vs-harness ontology); 3.10.9 adds run-level maxRuns (run retry count, paper baseline 5) |
+| V2.4.0 | 2026/10/17 | opencode | Added 3.11.8 pack self-containment: domain-specific tools ship with the pack (pack-local tools + full install); capability ownership ruling — CLH global (packages/llm-harness), paper-reproduction tools pack-specific, existing autoresearch globals untouched |
+| V2.5.0 | 2026/10/17 | opencode | 3.14 hardening (four defects proven by the CVE comparison run): preset schema adds per-preset `timeoutMs`; api backend switches to streaming (long generations no longer cut off by the gateway); call-level 429/transient backoff into 3.14.4 (attempt-internal convergence, owned by CLH); step-failure error values thread through |
+| V2.6.0 | 2026/10/18 | opencode | Ruling (second CVE comparison run: budget cap silently inert): built-in official pricing catalog (family → per-MTok, env override > catalog > none); fail-closed at run start with a declared flow/run budget and unresolvable pricing (stable code), never silent zero accrual — resolves 3.11.4 [TBD], no estimation |
 
 ---
 
-## 二、产品描述（做什么）
+## 1. Overview (why)
 
-### 2.1 产品需求描述
+### 1.1 Product overview and goals
 
-**做什么**：提供"声明式领域包 + 持久运行引擎 + Portal/API"三位一体的
-控制平面，覆盖 安装 → 钉住 → 准入 → 排队 → 执行 → 回执/产物 → 审查。
+#### 1.1.1 Background
 
-**不做什么**：
+Multi-agent systems are becoming a core productivity tool for teams, but
+when handing real business workloads to them, teams generally lack a
+unified control plane:
 
-- 不承载具体领域业务逻辑（由领域包与 tools 实现）；
-- 不做公有云多租 SaaS（自托管优先）；
-- 普通用户不可发起 live 模式运行（仅运维路径）。
+- Hard-coding a specific domain into the product cannot scale or be
+  reused;
+- Writing each step as a list of commands and arguments degrades a
+  Domain Pack into a shell script: later steps cannot validate inputs,
+  and there is no record of "what a given step may touch";
+- Runs leave no receipts or artifacts, so failures cannot be traced;
+- Identity, quota, lifecycle, and audit are scattered everywhere,
+  leaving fuzzy permission boundaries.
 
-**硬约束**：
+Polaris's answer: a DSL + Domain Pack carries "what the work is", and a
+self-hosted control plane carries "who can run it, how it runs, and
+what evidence it leaves".
 
-- 单一公共 origin；浏览器永远接触不到 Docker 端口、内部服务地址或
-  host 路径 URL；
-- 运行全程钉住 pack 版本与摘要（digest）；
-- `driver=none` 与 `vaultId` 互斥；`driver=vault` 必须提供 `vaultId`；
-- `.ord` v2 表达结构化编排（sequence/parallel/choice/forEach/
-  while/subflow，见 3.13）；编排模式进 DSL，attempt 内的领域收敛
-  迭代仍在工具内；
-- 平台已有的横切能力领域工具不重复实现：attempt 级重试、超时与
-  预算止损归步级策略（3.10）；隔离环境与干净重试归隔离执行器
-  （3.8）；回执、审计与产物留存归控制平面；模块工具只做领域逻辑
-  的单次尝试（能力归属见 3.11.7）；
-- exploit 代码绝不跑宿主机，只在隔离环境；
-- fail-closed：工具不全时 pack 保持不可执行；
-- 测试用合成 fixture，不用真实数据。
+> Requirements health-check note: this document is the sole ground
+> truth of the Polaris product — scope, process, and priority defer to
+> it; on conflict with other documents, this document wins; no delivery
+> is promised against fixed version numbers. Missing user evidence and
+> quantified success metrics are recorded as the first item of the
+> "items to confirm" list.
 
-### 2.2 产品整体流程
+#### 1.1.2 Product overview
 
-#### 2.2.1 主流程
+Polaris is a self-hosted control plane for isolated multi-agent systems.
+Users submit workflow runs through the Portal (browser app) or the REST
+API; the Polaris engine parses, validates, and compiles Domain Packs,
+performs admission, grants leases, queues and schedules work, and
+retains a receipt and artifacts for every step.
+
+#### 1.1.3 Product goals
+
+Three north-star metrics mapped to the three switching-cost dimensions
+(learning / migration / trust) — the product's value = driving down the
+adoption cost of a new workflow domain.
+
+**Business goals**
+
+| Goal | Metric | Target | Timeline |
+|------|--------|--------|----------|
+| Lower learning cost (north star 1) | New-domain onboarding person-days: from domain idea to a pack that turns green and runs | Set after measuring a baseline [TBD]; direction: monotonically decreasing | Ongoing |
+| Lower migration cost (north star 2) | Run success rate: succeeded / terminal runs | ≥ 90% [TBD]; old-approach baseline: a script crash reruns everything | Ongoing |
+| Lower migration cost (north star 2) | Retry rescue rate: eventually succeeded after retries / ever failed | Set after measuring a baseline [TBD] | Ongoing |
+| Lower trust cost (north star 3) | Traceability completeness: terminal runs can answer "who, when, which version, inputs and outputs" | 100% | Achieved |
+| Least privilege | Executors can only run pinned definitions while holding a valid lease | 100% enforced | Achieved |
+
+**User goals**
+
+| Target user | User goal | Measuring metric |
+|-------------|-----------|------------------|
+| Domain expert (packager) | A new domain needs only a pack + tools, no product internals | New-domain onboarding person-days (north star 1) |
+| Submitter | Occasional failures do not sink a run; live progress and artifacts visible | Run success rate / retry rescue rate (north star 2); timeline updates |
+| Approver | One-click handling at manual gates, operations leave a trail | waiting → running transition; complete audit |
+| Platform ops | Environment gaps visible in one precheck | `ops tool-precheck` required items all green |
+
+#### 1.1.4 Target users
+
+| Role | Description | Core need |
+|------|-------------|-----------|
+| Platform engineer / ops | Deploys and maintains Polaris, manages Domain Packs | Simple deployment, clear precheck, recoverable |
+| Domain expert (packager) | Wraps a domain into a Pack with the DSL | Enough expressiveness, manageable versions |
+| Submitter / executor | Submits runs, executes definitions within a lease | Transparent progress, retrievable artifacts |
+| Approver | Approves / rejects manual gates | Clear list, one-click action, audit trail |
+| Observer / reconciler | Views evidence, checks receipts and failures | Read-only, scope-controlled |
+
+### 1.2 Glossary
+
+| Term | Description |
+|------|-------------|
+| DSL | The language describing "what the work is, how data flows, which capabilities are allowed" |
+| Domain Pack | A versioned domain: entities, flows, ports, tags |
+| `.ord` | Domain pack declaration file; one `.ord` file or a directory containing `main.ord` |
+| Flow / Step | A workflow and its steps |
+| Port | Tool FFI interface; the Host decides who implements it and how it binds |
+| Host worker | Host-side executor, receives `driver=none` runs |
+| Vault | An isolated runtime environment, runs execute inside it when `driver=vault` |
+| Admission | Turning a run request into a managed run object |
+| Lease | The credential an executor needs to run a pinned definition |
+| Receipt | The record credential produced when a step completes |
+| Artifact | Output files produced by a run and released in a controlled way |
+| Run mode | `mock` (normal UI admission) / `host` (host executor) / `live` (ops-only path) |
+| Portal | Browser app (`apps/polaris-portal`), React/Vite |
+| Paseo | Embedded daemon carrying concrete agent session execution |
+| Surface / Gateway | Feature entry surface / private entry gateway, handles admission, tickets, and rate limiting |
+
+### 1.3 Roles and permissions
+
+| Role | Permission scope | Data scope |
+|------|------------------|------------|
+| observer | Reads packs and in-scope evidence | Authorized scope |
+| proposer | Creates disabled drafts | Own drafts |
+| approver | Approves / rejects drafts or run actions | In-scope runs |
+| executor | Runs pinned definitions (requires a current lease) | Pinned definitions |
+| reconciler | Checks receipts and failures | In-scope runs |
+| operator (outside the product) | Pack install/remove, live metadata admission, precheck | System-wide |
+
+> Rule: membership does not imply execution.
+
+### 1.4 Document audience
+
+| Audience | Focus |
+|----------|-------|
+| Engineering | Functional requirements, data dictionaries, system integration |
+| UI/UX | Portal routes and interactions, global rules |
+| Testing | Exception flows, acceptance criteria |
+| Ops | Version planning, non-functional requirements, tool precheck |
+
+---
+
+## 2. Product description (what)
+
+### 2.1 Product requirement description
+
+**What we build**: a control plane combining "declarative Domain Packs
++ a persistent run engine + Portal/API", covering install → pin →
+admit → queue → execute → receipt/artifacts → review.
+
+**What we do not build**:
+
+- No domain business logic lives here (Domain Packs and tools own it);
+- No public multi-tenant SaaS (self-hosted first);
+- Regular users cannot start live-mode runs (ops-only path).
+
+**Hard constraints**:
+
+- A single public origin; the browser never touches Docker ports,
+  internal service addresses, or host-path URLs;
+- Every run pins the pack version and digest for its whole lifetime;
+- `driver=none` and `vaultId` are mutually exclusive; `driver=vault`
+  requires `vaultId`;
+- `.ord` v2 expresses structured orchestration (sequence/parallel/
+  choice/forEach/while/subflow, see 3.13); orchestration moves into the
+  DSL, while domain convergence iterations inside an attempt stay in
+  tools;
+- Domain tools never re-implement platform cross-cutting capabilities:
+  attempt-level retry, timeout, and budget stop-loss belong to step
+  policy (3.10); isolated environments and clean retries belong to the
+  isolation executor (3.8); receipts, audit, and artifact retention
+  belong to the control plane; module tools do a single attempt of the
+  domain logic (capability ownership in 3.11.7);
+- Exploit code never runs on the host, only in isolated environments;
+- fail-closed: a pack stays non-executable when tools are incomplete;
+- Tests use synthetic fixtures, never real data.
+
+### 2.2 Overall product process
+
+#### 2.2.1 Main flow
 
 ```mermaid
 flowchart TD
-    A[用户在 Portal /work 或调用 REST API] --> B[解析 -> 校验 -> 编译 Pack]
-    B --> C{准入模式}
-    C -->|UI 准入| D[mock 运行]
-    C -->|driver=none| E[host 运行 -> 主机 worker]
-    C -->|运维 live 准入| F[live 运行]
-    D --> G[排队 queued]
+    A[User submits via Portal /work or the REST API] --> B[Parse -> validate -> compile pack]
+    B --> C{Admission mode}
+    C -->|UI admission| D[mock run]
+    C -->|driver=none| E[host run -> host worker]
+    C -->|ops live admission| F[live run]
+    D --> G[queued]
     E --> G
     F --> G
-    G --> H[领取租约 running]
-    H --> I{人工门禁?}
-    I -->|是| J[waiting 待审批]
+    G --> H[Claim lease, running]
+    H --> I{Manual gate?}
+    I -->|Yes| J[waiting, pending approval]
     J -->|approve| H
-    I -->|否| K[执行步骤: 工具绑定调用]
-    K --> L[回执 + 产物]
+    I -->|No| K[Execute steps: tool-binding calls]
+    K --> L[Receipt + artifacts]
     L --> M{succeeded / failed}
-    M -->|failed 可重试| G
-    M -->|succeeded| N[用户查看产物/证据]
+    M -->|failed, retryable| G
+    M -->|succeeded| N[User views artifacts / evidence]
 ```
 
-#### 2.2.2 子流程
+#### 2.2.2 Sub-flows
 
-- **审批子流程**：运行在人工门禁步骤进入 `waiting`，审批者批准后
-  回到 `running`；流程状态由 Polaris 持有，审批留审计记录。
-- **重试子流程**：`failed` 或 `cancelled` 的运行重入同一 run id 的
-  队列，跳过已完成的步骤，继续未完成部分。
-- **工具预检子流程**：`ops tool-precheck` 收集必需项（缺失则失败）
-  与建议项（警告 + 下一步指引）；Portal `/settings/tools` 展示同一
-  结果并支持 Recheck。
+- **Approval sub-flow**: a run enters `waiting` at a manual gate step
+  and returns to `running` once the approver approves; Polaris holds
+  the flow state and approval leaves an audit record.
+- **Retry sub-flow**: a `failed` or `cancelled` run re-enters the
+  queue under the same run id, skipping completed steps and continuing
+  the rest.
+- **Tool precheck sub-flow**: `ops tool-precheck` collects required
+  items (missing items fail) and recommended items (warning + next-step
+  guidance); Portal `/settings/tools` shows the same result and
+  supports Recheck.
 
-#### 2.2.3 数据流图（DFD）
+#### 2.2.3 Data flow diagram (DFD)
 
 ```mermaid
 flowchart LR
-    U[用户浏览器] -->|REST/SSE| P[Polaris 控制平面]
-    P -->|解析校验| PS[(Pack 存储 .ord)]
-    P -->|回执/状态| ST[(控制存储/状态文件)]
-    P -->|工具调用| T[tools/ 工具集]
-    T -->|文献检索| EXT[外部 API: Crossref/SemanticScholar/DeepSec]
-    T -->|PDF 捕获| BR[Camofox 浏览器]
-    T -->|报告生成| CX[Codex 会话]
-    P -->|vault 驱动| V[Vault 隔离运行时]
+    U[User browser] -->|REST/SSE| P[Polaris control plane]
+    P -->|parse, validate| PS[(Pack store .ord)]
+    P -->|receipts / status| ST[(Control store / state files)]
+    P -->|tool calls| T[tools/ toolset]
+    T -->|literature search| EXT[External APIs: Crossref/SemanticScholar/DeepSec]
+    T -->|PDF capture| BR[Camofox browser]
+    T -->|report generation| CX[Codex session]
+    P -->|vault driver| V[Vault isolated runtime]
     V --> DA[paseo daemon]
-    ST -->|受控开放| U
+    ST -->|controlled release| U
 ```
 
-#### 2.2.4 状态转换图（STD）
+#### 2.2.4 State transition diagram (STD)
 
 ```mermaid
 stateDiagram-v2
@@ -220,984 +237,1094 @@ stateDiagram-v2
     queued --> running
     running --> succeeded
     running --> waiting
-    waiting --> running : 人工批准
+    waiting --> running : manual approval
     running --> failed
-    failed --> queued : retry(同一 run id)
+    failed --> queued : retry (same run id)
     queued --> cancelled : cancel
     running --> cancelled : cancel
     waiting --> cancelled : cancel
     succeeded --> [*]
 ```
 
-### 2.3 全局说明
+### 2.3 Global notes
 
-#### 2.3.1 全局异常处理
+#### 2.3.1 Global exception handling
 
-| 异常场景 | 处理方式 | 提示文案 |
-|---------|---------|---------|
-| 网络异常 | 提示 + 重试 | "请检查网络连接" [待确认] |
-| 服务不可用 | Portal 显示错误，SSE 自动重连 | "服务暂不可用，稍后重试" [待确认] |
-| 权限不足 | 拒绝操作，记录审计 | "无操作权限" [待确认] |
-| Pack 校验失败 | 准入前拦截，返回具体错误 | 展示 parse/validate 错误详情 |
-| 工具依赖缺失 | 预检必需项标红并给下一步 | "必需项未满足，见下一步指引" |
-| 数据不存在 | 空状态页 | "运行不存在或已被删除" [待确认] |
+| Exception scenario | Handling | Message |
+|--------------------|----------|---------|
+| Network error | Prompt + retry | "Please check your network connection" [TBD] |
+| Service unavailable | Portal shows the error, SSE auto-reconnects | "Service temporarily unavailable, try again later" [TBD] |
+| Insufficient permission | Reject the action, record audit | "No permission for this action" [TBD] |
+| Pack validation failure | Intercept before admission, return the specific error | Show parse/validate error details |
+| Missing tool dependency | Precheck flags required items red with a next step | "Required items unmet, see next-step guidance" |
+| Data not found | Empty-state page | "Run not found or deleted" [TBD] |
 
-#### 2.3.2 普通列表规则
+#### 2.3.2 List rules
 
-| 规则项 | 说明 |
-|--------|------|
-| 运行列表 | `/work` 以卡片呈现 host/Vault 运行 |
-| 排序/分页 | [待确认]，建议默认按创建时间倒序 + 分页 |
-| 空数据 | 空状态提示 [待确认] |
-| 流程列表 | `/settings/workflows` 按 Pack 展示完整流程，可逐流程启停 |
+| Rule | Description |
+|------|-------------|
+| Run list | `/work` renders host/Vault runs as cards |
+| Sorting / pagination | [TBD]; suggested default: newest first by creation time + pagination |
+| Empty data | Empty-state prompt [TBD] |
+| Flow list | `/settings/workflows` shows full flows per pack, each flow can be toggled |
 
-#### 2.3.3 全局交互
+#### 2.3.3 Global interactions
 
-| 场景 | 交互方式 |
-|------|---------|
-| 提交运行 | 异步操作，按钮防重复提交 [待确认] |
-| 运行详情 | `/work/runs/:runId` 时间线（SSE 推送） |
-| 审批/取消/重试 | 详情页操作控件，二次确认 [待确认] |
-| 产物打开 | 受控预览（artifact preview），不留裸 URL |
+| Scenario | Interaction |
+|----------|-------------|
+| Submit run | Async operation, button guards against double submit [TBD] |
+| Run detail | `/work/runs/:runId` timeline (SSE push) |
+| Approve / cancel / retry | Detail-page action controls with confirmation [TBD] |
+| Open artifact | Controlled preview (artifact preview), never a raw URL |
 
-### 2.4 产品版本规划
+### 2.4 Version planning
 
-不以固定版本号承诺交付。范围与优先级以 2.6 功能清单为准（本文档是
-唯一 ground truth）；交付节奏按需求信号滚动：新需求先进 2.6 功能
-清单评审，再进入开发，完成一项从清单上看到一项。功能清单由产品
-负责人维护：完成一项即在 2.6 标注完成。
+No delivery is promised against fixed version numbers. Scope and
+priority follow the 2.6 functional inventory (this document is the sole
+ground truth); delivery cadence rolls with requirement signals: new
+requirements enter the 2.6 functional inventory for review first, then
+development, and each completed item becomes visible on the inventory.
+The product owner maintains the inventory: completing an item marks it
+done in 2.6.
 
-### 2.5 产品框架
+### 2.5 Product framework
 
 ```mermaid
 flowchart LR
-  B[Browser] --> O[单一公共 origin]
-  O --> P[Polaris 控制平面]
+  B[Browser] --> O[Single public origin]
+  O --> P[Polaris control plane]
   P --> CS[Coding surface]
-  P --> GW[私有 surface gateway]
-  P --> RT[选定的 vault runtime]
+  P --> GW[Private surface gateway]
+  P --> RT[Selected vault runtime]
   GW --> RT
   RT --> DA[paseo daemon]
 ```
 
-| 层 | 职责 |
-|----|------|
-| `apps/polaris-portal` | React 页面、卡片、导航、Zustand、SSE 客户端；不持有身份与授权权威 |
-| `@polaris/polaris-shell` | 路由/产品线/宿主动作/用户契约 |
-| `apps/polaris`（服务端） | 认证 API、Pack 投影、持久工作流控制、SSE、生命周期适配、静态产物服务 |
-| `packages/polaris-workflow` | DSL 运行时（parse/resolve/validate/compile） |
-| `tools/` | 约 25 个 Python 工具，实现 Port |
-| `packages/vault-runtime` | Vault 隔离运行时 |
-| Polaris Gateway | surface 准入、票据、限流、代理策略 |
+| Layer | Responsibility |
+|-------|----------------|
+| `apps/polaris-portal` | React pages, cards, navigation, Zustand, SSE client; holds no identity or authorization authority |
+| `@polaris/polaris-shell` | Routing / product lines / host actions / user contract |
+| `apps/polaris` (server) | Auth API, pack projection, persistent workflow control, SSE, lifecycle adapters, static artifact serving |
+| `packages/polaris-workflow` | DSL runtime (parse/resolve/validate/compile) |
+| `tools/` | ~25 Python tools implementing Ports |
+| `packages/vault-runtime` | Vault isolated runtime |
+| Polaris Gateway | Surface admission, tickets, rate limiting, proxy policy |
 
-### 2.6 功能清单
+### 2.6 Functional inventory
 
-| 模块 | 功能 | 优先级 | 说明 |
-|------|------|--------|------|
-| 工作流定义 | Pack 安装/列表/移除 | P0 | CLI 走同一 parse→resolve→validate |
-| 工作流定义 | 流程启停 | P0 | `/settings/workflows` |
-| 运行 | Portal 提交（work desk） | P0 | 选场景 + 可选 Vault 目标 |
-| 运行 | REST API 提交 | P0 | 已交付（2026/10/17）：`/api/workflow-runs` + 幂等键（Idempotency-Key header / body 字段，同 key 同 run） |
-| 运行 | host 持久运行 | P0 | `driver=none`，`mode:"host"` |
-| 运行 | 同 run 重试 | P0 | 跳过已完成步骤 |
-| 运行 | 步级重试与预算止损 | P0 | 已交付（2026/10/16）：maxAttempts / timeout / budget，默认 maxAttempts=1 行为不变 |
-| 运行 | 隔离环境执行器（干净环境重试） | P1 | 可选项，3.10 之后按需交付 |
-| 端口 | 沙箱 CLI 执行端口 | P1 | 可选项，与 3.8 配套 |
-| 审批 | 人工门禁（manual review） | P0 | waiting/approve/审计 |
-| 产物 | 受控预览与导出 | P0 | 原子导出 |
-| 监控 | 运行时间线（SSE） | P0 | 范围内事件 |
-| 用户 | 身份/角色/产品线访问 | P0 | Authing 可禁用模式 |
-| 运维 | 工具预检 | P0 | CLI + `/settings/tools` |
-| 运维 | live 元数据准入 | P1 | 唯一 live 路径 |
-| 工具 | 领域模块工具与清单注册 | P0 | 已交付（2026/10/17）：cve 四薄工具经 CLH；注册后 pack 转绿（见 3.11） |
-| 工具 | pack 自含（pack-local tools + 完整安装） | P0 | 已交付（2026/10/17）：cve 五包移入 pack；解析 pack 本地优先；完整安装含 tools/+harness/，见 3.11.8 |
-| 产物 | 发布护栏（final 门槛 + 深度门槛 + provenance） | P0 | 已交付（2026/10/17）：R-1/R-2/R-3 守卫 + 三态发布，见 3.12 |
-| 定义 | DSL v2 结构化编排（parallel/choice/forEach/while/subflow） | P0 | 已交付（2026/10/16）：引擎 + Portal 渲染，见 3.13 |
-| 运行 | run 级预算帽 + 步级/flow 级预算语法 | P0 | 已交付（2026/10/16）：run 帽 + maxAttempts 语法 + flow 级声明，见 3.10.9 |
-| 运行 | run 级 maxRuns（run 重试计数） | P1 | flow 级 `maxRuns <n>`，默认 1 不变；论文 baseline 5，见 3.10.9 |
-| 基础设施 | LLM 调用运行时（CLH：preset schema + compiler + wrapper + dispatcher seam） | P0 | 已交付（2026/10/17）：dsh 打头后端；api/bounded/open 三档 kind；8 份 preset，见 3.14 |
+| Module | Feature | Priority | Notes |
+|--------|---------|----------|-------|
+| Workflow definition | Pack install / list / remove | P0 | CLI shares the same parse→resolve→validate |
+| Workflow definition | Flow enable/disable | P0 | `/settings/workflows` |
+| Runs | Portal submission (work desk) | P0 | Pick scenario + optional Vault target |
+| Runs | REST API submission | P0 | Delivered (2026/10/17): `/api/workflow-runs` + idempotency key (Idempotency-Key header / body field, same key same run) |
+| Runs | Persistent host runs | P0 | `driver=none`, `mode:"host"` |
+| Runs | Same-run retry | P0 | Skips completed steps |
+| Runs | Step-level retry and budget stop | P0 | Delivered (2026/10/16): maxAttempts / timeout / budget; default maxAttempts=1 behavior unchanged |
+| Runs | Isolated environment executor (clean-environment retry) | P1 | Optional, delivered after 3.10 as needed |
+| Ports | Sandbox CLI execution port | P1 | Optional, pairs with 3.8 |
+| Approval | Manual gate (manual review) | P0 | waiting/approve/audit |
+| Artifacts | Controlled preview and export | P0 | Atomic export |
+| Monitoring | Run timeline (SSE) | P0 | In-scope events |
+| Users | Identity / roles / product-line access | P0 | Authing with a disableable mode |
+| Ops | Tool precheck | P0 | CLI + `/settings/tools` |
+| Ops | Live metadata admission | P1 | The only live path |
+| Tools | Domain module tools and inventory registration | P0 | Delivered (2026/10/17): four thin cve tools on CLH; pack turns green after registration (see 3.11) |
+| Tools | Pack self-containment (pack-local tools + full install) | P0 | Delivered (2026/10/17): five cve packages moved into the pack; pack-local-first resolution; full install includes tools/+harness/, see 3.11.8 |
+| Artifacts | Release guardrails (final gate + depth gate + provenance) | P0 | Delivered (2026/10/17): R-1/R-2/R-3 guards + three-state publication, see 3.12 |
+| Definition | DSL v2 structured orchestration (parallel/choice/forEach/while/subflow) | P0 | Delivered (2026/10/16): engine + Portal rendering, see 3.13 |
+| Runs | Run-level budget cap + step-level/flow-level budget syntax | P0 | Delivered (2026/10/16): run cap + maxAttempts syntax + flow-level declaration, see 3.10.9 |
+| Runs | Run-level maxRuns (run retry count) | P1 | Flow-level `maxRuns <n>`, default 1 unchanged; paper baseline 5, see 3.10.9 |
+| Infrastructure | LLM invocation runtime (CLH: preset schema + compiler + wrapper + dispatcher seam) | P0 | Delivered (2026/10/17): dsh-first backend; api/bounded/open kinds; 8 presets, see 3.14 |
 
 ---
 
-## 三、功能需求（怎么做）
+## 3. Functional requirements (how)
 
-### 3.1 工作流定义管理（Domain Pack）
+### 3.1 Workflow definition management (Domain Pack)
 
-#### 3.1.1 描述
-安装、查看、移除领域包；按包管理流程的启用/禁用。
+#### 3.1.1 Description
+Install, view, and remove Domain Packs; enable/disable flows per pack.
 
-#### 3.1.2 用户故事
+#### 3.1.2 User stories
 ```
-作为运维，我希望通过 CLI 安装一个 .ord 包并看到校验结果，
-以便只发布通过 parse→resolve→validate 的可信定义。
-作为提交者，我希望在 /settings/workflows 看到某个 Pack 的全部流程并启停，
-以便控制我的工作台可见的流程范围。
-```
-
-#### 3.1.3 前置条件
-
-| 类型 | 条件 |
-|------|------|
-| 权限依赖 | 安装/移除需运维权限 |
-| 数据依赖 | `.ord` 文件或含 `main.ord` 的目录 |
-
-#### 3.1.4 后置条件
-- pack 进入已安装清单并生成 manifest；pack 版本与摘要被后续运行钉住。
-
-#### 3.1.5 界面及交互
-
-| 元素 | 类型 | 必填 | 默认值 | 校验规则 | 操作反馈 |
-|------|------|------|--------|---------|---------|
-| pack add 目标 | CLI 参数 | 是 | - | 存在的 .ord/目录 | 校验失败输出错误详情 |
-| 流程启用开关 | 开关控件 | 否 | 安装时默认值 [待确认] | - | 即时生效并记录 |
-
-#### 3.1.6 业务流程
-`pack add` → parse → resolve → validate → 原子安装（三步同引擎准入
-前序一致）；一方包（`packs/`）与三方包（`third_party/`）自动发现。
-
-#### 3.1.7 异常/分支流程
-
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 校验失败 | DSL 语法/引用错误 | 拒绝安装，输出错误 | parse/validate 错误详情 |
-| 重复安装 | 同 domain+版本已存在 | 幂等或拒绝 [待确认] | "该版本已安装" |
-| 移除被引用包 | 有运行钉住该版本 | 拒绝或按版本移除 [待确认] | - |
-
-#### 3.1.8 数据字典（Pack 安装清单）
-
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| packId | String | 是 | 领域标识 | "autoresearch" |
-| version | String | 是 | 语义化版本 | "0.4.0" |
-| digest | String | 是 | 内容摘要，运行钉住 | "sha256:..." [待确认] |
-| source | Enum | 是 | first-party/third-party | "first-party" |
-| installed_at | DateTime | 是 | 安装时间 | 2026-09-11 |
-
-### 3.2 运行提交与准入
-
-#### 3.2.1 描述
-用户经 Portal 工作台或 REST API 提交运行；引擎完成准入并持久化。
-
-#### 3.2.2 用户故事
-```
-作为提交者，我希望 POST /api/workflow-runs 提交一次文献综述运行，
-以便稍后在详情页查看进度和产物。
-作为提交者，我希望在 /work 选一个领域包作为工作场景并提交，
-以便不写代码也能发起运行。
+As ops, I want to install a .ord pack through the CLI and see the
+validation results, so that only trusted definitions passing
+parse→resolve→validate get published.
+As a submitter, I want to see all flows of a pack in /settings/workflows
+and toggle them, so that I control the flow scope visible in my work
+desk.
 ```
 
-#### 3.2.3 前置条件
+#### 3.1.3 Preconditions
 
-| 类型 | 条件 |
-|------|------|
-| 数据依赖 | 目标 Pack 已安装且流程已启用 |
-| 权限依赖 | 用户具备执行权限（executor） |
-| 约束依赖 | `driver=none` 不可与 `vaultId` 同用；`driver=vault` 必须带 `vaultId` |
+| Type | Condition |
+|------|-----------|
+| Permission dependency | Install/remove requires ops permission |
+| Data dependency | An `.ord` file or a directory containing `main.ord` |
 
-#### 3.2.4 后置条件
-- 生成持久运行对象（含钉住的 pack 版本/摘要），进入 `queued`；
-- 普通界面准入产生 `mode:"mock"`，主机准入产生 `mode:"host"`。
+#### 3.1.4 Postconditions
+- The pack enters the installed inventory and generates a manifest;
+  later runs pin the pack version and digest.
 
-#### 3.2.5 界面及交互（REST 请求体）
+#### 3.1.5 UI and interactions
 
-| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 说明 |
-|------|------|------|--------|---------|------|
-| packId | String | 是 | - | 已安装的 pack | 领域包 |
-| flowId | String | 是 | - | pack 内已启用流程 | 流程 |
-| driver | Enum | 否 | none | none/vault | 执行目标 |
-| vaultId | String | 条件 | - | driver=vault 时必填 | 隔离环境 |
-| values | String | 是 | - | `key=value` 对 | 入参，如 question、audience |
-| scenario | String | 否 | - | - | 场景（[待确认] 具体取值） |
-| Idempotency-Key | String | 否 | - | 全局唯一 [待确认] | 重复提交返回同一 run |
+| Element | Type | Required | Default | Validation | Feedback |
+|---------|------|----------|---------|------------|----------|
+| pack add target | CLI argument | Yes | - | Existing .ord / directory | Validation failure prints error details |
+| Flow enable toggle | Toggle control | No | Install-time default [TBD] | - | Takes effect immediately and is recorded |
 
-#### 3.2.6 业务流程
-见 2.2.1 主流程前半段。
+#### 3.1.6 Business flow
+`pack add` → parse → resolve → validate → atomic install (the same
+three steps as the engine's admission prerequisites); first-party packs
+(`packs/`) and third-party packs (`third_party/`) are auto-discovered.
 
-#### 3.2.7 异常/分支流程
+#### 3.1.7 Exceptions / branches
 
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 流程被禁用 | flowId 未启用 | 拒绝准入 | "流程未启用" |
-| 参数缺失 | values 缺关键字段 | 拒绝准入并列出缺失项 | 表单/错误详情 |
-| driver 冲突 | none + vaultId | 拒绝准入 | "参数互斥" |
-| 重复提交 | 同 Idempotency-Key 重复 POST | 返回同一 run，不建新运行 | 复用已有运行 |
-| 未认证 | 会话缺失/过期 | 跳转 /welcome | 认证模式展示 |
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Validation failure | DSL syntax / reference error | Reject install, print errors | parse/validate error details |
+| Duplicate install | Same domain + version exists | Idempotent or reject [TBD] | "This version is already installed" |
+| Removing a referenced pack | A run pins that version | Reject or remove per version [TBD] | - |
 
-#### 3.2.8 数据字典（workflow_run）
+#### 3.1.8 Data dictionary (pack install inventory)
 
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| runId | String | 是 | 运行唯一标识 | "run-..." [待确认] |
-| packId / flowId | String | 是 | 定义引用 | "autoresearch"/"LiteratureReview" |
-| pinnedVersion / digest | String | 是 | 钉住的定义版本 | "0.4.0" |
-| mode | Enum | 是 | mock/host/live | "host" |
-| driver | Enum | 是 | none/vault | "none" |
-| values | Object | 是 | 入参键值 | question=... |
-| status | Enum | 是 | queued/running/waiting/succeeded/failed/cancelled | "queued" |
-| createdAt / updatedAt | DateTime | 是 | 时间戳 | 2026-10-16 |
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| packId | String | Yes | Domain identifier | "autoresearch" |
+| version | String | Yes | Semantic version | "0.4.0" |
+| digest | String | Yes | Content digest, pinned by runs | "sha256:..." [TBD] |
+| source | Enum | Yes | first-party/third-party | "first-party" |
+| installed_at | DateTime | Yes | Install time | 2026-09-11 |
 
-### 3.3 运行执行与监控
+### 3.2 Run submission and admission
 
-#### 3.3.1 描述
-引擎按排队/租约调度执行步骤，产出回执与产物；Portal 经 SSE 呈现时间线。
+#### 3.2.1 Description
+Users submit runs via the Portal work desk or the REST API; the engine
+completes admission and persists the run.
 
-#### 3.3.2 用户故事
+#### 3.2.2 User stories
 ```
-作为提交者，我希望在 /work/runs/:runId 看到每步的时间线与回执，
-以便知道运行卡在哪一步。
-作为对账者，我希望检查失败的回执与证据，以便定位失败原因。
+As a submitter, I want to submit a literature-review run via
+POST /api/workflow-runs, so that I can later check progress and
+artifacts on the detail page.
+As a submitter, I want to pick a Domain Pack as the work scenario in
+/work and submit, so that I can start runs without writing code.
 ```
 
-#### 3.3.3 前置条件
-运行已准入并持久化；用户具备该运行范围的观察权限。
+#### 3.2.3 Preconditions
 
-#### 3.3.4 后置条件
-每步产生 receipt；产物进入受控产物区；状态机按 2.2.4 流转。
+| Type | Condition |
+|------|-----------|
+| Data dependency | Target pack installed and its flows enabled |
+| Permission dependency | User holds executor permission |
+| Constraint dependency | `driver=none` cannot combine with `vaultId`; `driver=vault` requires `vaultId` |
 
-#### 3.3.5 界面及交互
+#### 3.2.4 Postconditions
+- A persistent run object is created (with pinned pack version/digest)
+  and enters `queued`;
+- Normal UI admission produces `mode:"mock"`, host admission produces
+  `mode:"host"`.
 
-| 元素 | 类型 | 必填 | 默认值 | 校验规则 | 操作反馈 |
-|------|------|------|--------|---------|---------|
-| 时间线 | 步骤列表（SSE） | 是 | 全量回放 + 增量 | - | 实时追加 |
-| 历次尝试 | 步骤分组（attempt 序号） | 否 | 折叠 | - | 失败步展开历次尝试回执 |
-| 操作区 | 按钮（approve/cancel/retry） | 是 | 按状态显隐 | 状态合法才可点 | 置灰防重复 |
-| 产物入口 | 链接卡片 | 否 | - | 受控开放 | 打开预览 |
+#### 3.2.5 UI and interactions (REST request body)
 
-#### 3.3.6 业务流程
-`queued` → worker 领取（lease）→ 逐步执行（工具绑定）→ 每步回执 →
-终态。人工门禁步骤转 `waiting`。
+| Field | Type | Required | Default | Validation | Description |
+|-------|------|----------|---------|------------|-------------|
+| packId | String | Yes | - | Installed pack | Domain pack |
+| flowId | String | Yes | - | Enabled flow inside the pack | Flow |
+| driver | Enum | No | none | none/vault | Execution target |
+| vaultId | String | Conditional | - | Required when driver=vault | Isolated environment |
+| values | String | Yes | - | `key=value` pairs | Inputs, e.g. question, audience |
+| scenario | String | No | - | - | Scenario ([TBD] concrete values) |
+| Idempotency-Key | String | No | - | Globally unique [TBD] | Duplicate submission returns the same run |
 
-#### 3.3.7 异常/分支流程
+#### 3.2.6 Business flow
+See the first half of the main flow in 2.2.1.
 
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 步骤失败 | 工具返回失败 | 运行转 `failed`，保留回执 | 详情页展示失败步骤 |
-| 租约失效 | lease 过期 | 停止执行 [待确认] | - |
-| SSE 断开 | 网络中断 | 自动重连 + 全量对账 | 短暂提示 |
-| 重复操作 | 连点 retry/cancel | 幂等处理 | 按钮置灰 |
+#### 3.2.7 Exceptions / branches
 
-#### 3.3.8 数据字典（receipt）
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Flow disabled | flowId not enabled | Reject admission | "Flow not enabled" |
+| Missing parameters | values missing key fields | Reject admission, list missing items | Form / error details |
+| driver conflict | none + vaultId | Reject admission | "Parameters are mutually exclusive" |
+| Duplicate submission | Same Idempotency-Key POSTed again | Return the same run, no new run created | Reuse the existing run |
+| Unauthenticated | Session missing / expired | Redirect to /welcome | Show auth mode |
 
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| runId | String | 是 | 所属运行 | "run-..." |
-| stepId | String | 是 | 步骤标识 | "literature.collection" |
-| status | Enum | 是 | succeeded/partial/failed | "succeeded" |
-| output | Object | 否 | 产出引用/摘要 | - |
-| createdAt | DateTime | 是 | 完成时间 | 2026-10-16 |
+#### 3.2.8 Data dictionary (workflow_run)
 
-### 3.4 人工审批（人工门禁）
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| runId | String | Yes | Unique run identifier | "run-..." [TBD] |
+| packId / flowId | String | Yes | Definition references | "autoresearch"/"LiteratureReview" |
+| pinnedVersion / digest | String | Yes | Pinned definition version | "0.4.0" |
+| mode | Enum | Yes | mock/host/live | "host" |
+| driver | Enum | Yes | none/vault | "none" |
+| values | Object | Yes | Input key-values | question=... |
+| status | Enum | Yes | queued/running/waiting/succeeded/failed/cancelled | "queued" |
+| createdAt / updatedAt | DateTime | Yes | Timestamps | 2026-10-16 |
 
-#### 3.4.1 描述
-流程在声明的人工门禁处暂停，审批者批准/驳回后继续或终止。
+### 3.3 Run execution and monitoring
 
-#### 3.4.2 用户故事
+#### 3.3.1 Description
+The engine executes steps via queueing/lease scheduling and produces
+receipts and artifacts; the Portal renders the timeline over SSE.
+
+#### 3.3.2 User stories
 ```
-作为审批者，我希望看到待审批清单并一键批准，
-以便流程在受控下继续。
-```
-
-#### 3.4.3 前置条件
-用户具备 approver 角色；运行处于 `waiting`。
-
-#### 3.4.4 后置条件
-- 状态 `waiting → running`；写入审计（audit）记录；
-- 审批身份稳定（review identity），支持续跑后追溯。
-
-#### 3.4.5 界面及交互
-
-| 元素 | 类型 | 必填 | 默认值 | 校验规则 | 操作反馈 |
-|------|------|------|--------|---------|---------|
-| 待审列表 | 列表页 | 是 | - | 仅范围内 | 空状态 |
-| 批准/驳回 | 按钮 | 是 | - | 二次确认 [待确认] | 状态即时更新 |
-
-#### 3.4.6 业务流程
-`running` → 门禁步骤 → `waiting` → approver 操作 → `running`（批准）
-或按流程定义终止/驳回 [待确认：驳回后行为]。
-
-#### 3.4.7 异常/分支流程
-
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 非审批者操作 | 权限不足 | 拒绝 + 审计 | "无操作权限" |
-| 并发审批 | 两人同时操作 | 先到先得，后者幂等失败 | "已由他人处理" |
-| 超时未审 | [待确认：是否有超时] | 保持 waiting | - |
-
-#### 3.4.8 数据字典（review 审计）
-
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| reviewId | String | 是 | 稳定审批标识 | "rev-..." |
-| runId | String | 是 | 所属运行 | "run-..." |
-| reviewerId | String | 是 | 审批人 | 用户 ID |
-| action | Enum | 是 | approve/reject | "approve" |
-| at | DateTime | 是 | 操作时间 | 2026-10-16 |
-
-### 3.5 产物查看与导出
-
-#### 3.5.1 描述
-运行产物（报告、图、PDF、BibTeX 等）经受控预览与原子导出开放给
-有权限的用户。
-
-#### 3.5.2 用户故事
-```
-作为提交者，我希望在详情页直接预览最终报告并导出，
-以便离线使用和归档。
+As a submitter, I want to see a per-step timeline and receipts at
+/work/runs/:runId, so that I know which step a run is stuck on.
+As a reconciler, I want to inspect failed receipts and evidence, so
+that I can locate the cause of a failure.
 ```
 
-#### 3.5.3 前置条件
-运行到达可开放产物的状态；用户在授权范围内。
+#### 3.3.3 Preconditions
+The run has been admitted and persisted; the user has observation
+permission for that run's scope.
 
-#### 3.5.4 后置条件
-产物视图记录访问；导出为原子操作（不产生半截文件）。
+#### 3.3.4 Postconditions
+Each step produces a receipt; artifacts enter the controlled artifact
+area; the state machine transitions per 2.2.4.
 
-#### 3.5.5 界面及交互
+#### 3.3.5 UI and interactions
 
-| 元素 | 类型 | 必填 | 默认值 | 校验规则 | 操作反馈 |
-|------|------|------|--------|---------|---------|
-| 产物预览 | 内嵌预览组件 | 否 | - | 类型白名单 | 不支持类型给下载 |
-| 导出 | 按钮 | 否 | - | 二次确认 [待确认] | 原子导出成功提示 |
+| Element | Type | Required | Default | Validation | Feedback |
+|---------|------|----------|---------|------------|----------|
+| Timeline | Step list (SSE) | Yes | Full replay + incremental | - | Appends in real time |
+| Attempt history | Step grouping (attempt number) | No | Collapsed | - | Failed steps expand past attempt receipts |
+| Action area | Buttons (approve/cancel/retry) | Yes | Shown by state | Clickable only in legal states | Greyed out to prevent repeats |
+| Artifact entry | Link cards | No | - | Controlled release | Opens preview |
 
-#### 3.5.6 业务流程
-产物服务（静态产物服务）校验权限 → 预览/导出；浏览器始终只见
-公共 origin 路由，不见存储路径。
+#### 3.3.6 Business flow
+`queued` → worker claims (lease) → execute step by step (tool
+bindings) → receipt per step → terminal state. Manual gate steps turn
+`waiting`.
 
-#### 3.5.7 异常/分支流程
+#### 3.3.7 Exceptions / branches
 
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 产物缺失 | 生成失败/被清理 | 空状态 | "产物不存在" |
-| 无权限 | 范围外访问 | 拒绝 + 审计 | "无访问权限" |
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Step failure | Tool returns failure | Run turns `failed`, receipts kept | Detail page shows the failed step |
+| Lease expiry | lease expired | Stop execution [TBD] | - |
+| SSE disconnect | Network interruption | Auto-reconnect + full reconciliation | Brief prompt |
+| Repeated action | Double-click retry/cancel | Idempotent handling | Button greyed out |
 
-#### 3.5.8 数据字典（artifact）
+#### 3.3.8 Data dictionary (receipt)
 
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| artifactId | String | 是 | 产物标识 | "art-..." [待确认] |
-| runId | String | 是 | 所属运行 | "run-..." |
-| kind | Enum | 是 | report/pdf/dot/bibtex/... | "report" |
-| visibility | Enum | 是 | review-list/non-review 等 [待确认] | "review-list" |
-| size / createdAt | - | 是 | 元信息 | - |
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| runId | String | Yes | Owning run | "run-..." |
+| stepId | String | Yes | Step identifier | "literature.collection" |
+| status | Enum | Yes | succeeded/partial/failed | "succeeded" |
+| output | Object | No | Output reference / summary | - |
+| createdAt | DateTime | Yes | Completion time | 2026-10-16 |
 
-### 3.6 用户与权限管理
+### 3.4 Manual approval (manual gate)
 
-#### 3.6.1 描述
-Authing 身份映射（可禁用模式）、租户与 Vault 所有权、角色与产品线
-访问控制。
+#### 3.4.1 Description
+A flow pauses at a declared manual gate; after the approver approves or
+rejects, it continues or terminates.
 
-#### 3.6.2 用户故事
+#### 3.4.2 User stories
 ```
-作为运维，我希望以 POLARIS_AUTH_MODE=disabled 快速起本地环境，
-以便开发调试不依赖外部身份服务。
-```
-
-#### 3.6.3 前置条件 / 3.6.4 后置条件
-本地禁用模式下使用 `POLARIS_AUTH_DEFAULT_USER_ID` 的默认用户；
-正式模式经 `/auth/callback` 完成 code 交换。
-
-#### 3.6.5 界面及交互
-`/welcome`（展示当前认证模式）、`/auth/callback`、`/settings/user`
-（基本信息 / 凭证 / 会话 三段并列）。
-
-#### 3.6.6 异常/分支流程
-会话过期 → 重定向 `/welcome`；身份映射失败 → 明确错误 [待确认]。
-
-#### 3.6.7 数据字典
-见 `apps/docs/site/polaris/user-management.md`（本文档不重复）。
-
-### 3.7 工具接入与预检
-
-#### 3.7.1 描述
-工具（tools/）实现 Port；`ops tool-precheck` 与 `/settings/tools`
-暴露同一 check-setup 结果，必需项缺失则失败，建议项给下一步指引。
-
-#### 3.7.2 用户故事
-```
-作为运维，我希望启动前一键预检所有工具依赖，
-以便快速发现缺 API Key、DISPLAY、Camofox 等环境缺口。
+As an approver, I want to see the pending list and approve with one
+click, so that the flow continues under control.
 ```
 
-#### 3.7.3 界面及交互
+#### 3.4.3 Preconditions
+The user holds the approver role; the run is in `waiting`.
 
-| 元素 | 类型 | 必填 | 默认值 | 校验规则 | 操作反馈 |
-|------|------|------|--------|---------|---------|
-| 预检结果 | 分组列表 | 是 | - | 必需/建议两级 | 缺项标红 |
-| Recheck | 按钮 | 否 | - | - | 重新运行 check-setup |
+#### 3.4.4 Postconditions
+- State moves `waiting → running`; an audit record is written;
+- Approval identity is stable (review identity), supporting
+  traceability across resumed runs.
 
-#### 3.7.4 异常/分支流程
-单工具 check-setup 失败只影响该工具；必需项缺失时 Portal 启动仍会
-记录并输出剩余缺口（不阻断启动）。
+#### 3.4.5 UI and interactions
 
-### 3.8 隔离环境执行器（Vault）
+| Element | Type | Required | Default | Validation | Feedback |
+|---------|------|----------|---------|------------|----------|
+| Pending list | List page | Yes | - | In-scope only | Empty state |
+| Approve / reject | Buttons | Yes | - | Confirmation [TBD] | State updates immediately |
 
-#### 3.8.1 描述
-现状：Vault-target 运行只能 `mode:"mock"`——引擎对 Vault 运行不启用
-工具执行器。目标：真 `mode:"vault"`——在隔离 Vault 运行时（内嵌
-paseo daemon）中执行运行，每次 attempt 在全新隔离环境（写时复制）
-中执行，支持"干净环境重试"，污染不跨 attempt 传播。
+#### 3.4.6 Business flow
+`running` → gate step → `waiting` → approver acts → `running` (approved)
+or terminate/reject per the flow definition [TBD: behavior after
+reject].
 
-交付顺序：本功能与 3.9 为可选项（沙箱或无沙箱），在 3.10（步级
-重试与预算止损）之后按需交付，见 2.4。
+#### 3.4.7 Exceptions / branches
 
-#### 3.8.2 用户故事
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Non-approver acts | Insufficient permission | Reject + audit | "No permission for this action" |
+| Concurrent approval | Two users act at once | First wins; the second fails idempotently | "Already handled by someone else" |
+| Approval timeout | [TBD: whether a timeout exists] | Stays waiting | - |
+
+#### 3.4.8 Data dictionary (review audit)
+
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| reviewId | String | Yes | Stable approval identifier | "rev-..." |
+| runId | String | Yes | Owning run | "run-..." |
+| reviewerId | String | Yes | Approver | User ID |
+| action | Enum | Yes | approve/reject | "approve" |
+| at | DateTime | Yes | Action time | 2026-10-16 |
+
+### 3.5 Artifact viewing and export
+
+#### 3.5.1 Description
+Run artifacts (reports, graphs, PDFs, BibTeX, etc.) are released to
+authorized users through controlled preview and atomic export.
+
+#### 3.5.2 User stories
 ```
-作为执行者，我希望失败步骤的重试在一个全新隔离环境中执行，
-以便前一次尝试留下的环境污染不影响后续尝试。
-作为运维，我希望长流程的中间产物随环境快照一并留存，
-以便失败后从干净状态恢复。
-```
-
-#### 3.8.3 前置条件
-
-| 类型 | 条件 |
-|------|------|
-| 权限依赖 | driver=vault 必须提供 vaultId |
-| 功能依赖 | 3.2 运行提交与准入 |
-
-#### 3.8.4 后置条件
-- 运行在隔离环境内执行；尝试结束后环境快照与产物入库。
-
-#### 3.8.5 界面及交互
-
-| 元素 | 类型 | 必填 | 默认值 | 校验规则 | 操作反馈 |
-|------|------|------|--------|---------|---------|
-| vaultId | 选择控件 | 条件 | - | 归属当前用户 | 无权限时拒绝 |
-| 重试 | 按钮 | 否 | - | 状态为 failed 才可点 | 新环境重试提示 |
-
-#### 3.8.6 业务流程
-failed → retry → 新建隔离环境（干净副本）→ 从已完成步骤续跑 →
-失败步骤重新执行。
-
-#### 3.8.7 异常/分支流程
-
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 环境创建失败 | 资源不足/镜像缺失 | 运行转 failed，保留回执 | "隔离环境创建失败" |
-| 环境超时 | 超过步级预算 | 步失败，触发重试策略 | "执行超时" |
-
-#### 3.8.8 数据字典（隔离环境）
-
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| vaultId | String | 是 | 隔离环境标识 | "vault-..." |
-| baseImage | String | 是 | 基础镜像 | "ubuntu-22.04" [待确认] |
-| envState | Enum | 是 | fresh/dirty/snapshotted | "fresh" |
-| snapshotRef | String | 否 | 环境快照引用 | "snap-..." [待确认] |
-
-### 3.9 沙箱 CLI 执行端口
-
-#### 3.9.1 描述
-Agent 与隔离环境交互的唯一通道，四原语：exec / get_file /
-write_file / list_dir。以 Port 声明、由 Host 绑定实现
-（binary/timeoutMs/workdir），命令级回执（exitCode/stdoutRef/costUsd）；
-领域包不硬编码实现细节。
-
-受控的唯一边界：沙箱环境 scrub（进程环境不含宿主凭据）+ 路径禁闭
-（任何路径解析拒绝逃逸环境根）+ 单命令 timeoutMs。
-
-交付顺序：本功能为可选项（沙箱或无沙箱），与 3.8 配套，在 3.10
-之后按需交付，见 2.4。
-
-#### 3.9.2 用户故事
-```
-作为打包者，我希望声明一个沙箱 CLI 端口，让流程步骤能在隔离
-环境内执行受控命令，以便领域逻辑不进产品代码。
-作为运维，我希望限制端口可执行的命令与超时，以便控制风险。
+As a submitter, I want to preview the final report on the detail page
+and export it, so that I can use it offline and archive it.
 ```
 
-#### 3.9.3 前置条件
+#### 3.5.3 Preconditions
+The run reached a state where artifacts can be released; the user is
+within the authorized scope.
 
-| 类型 | 条件 |
-|------|------|
-| 数据依赖 | 3.8 隔离环境可用 |
-| 权限依赖 | Port 由 Pack 声明、Host 绑定 |
+#### 3.5.4 Postconditions
+Artifact views record access; export is atomic (never a partial file).
 
-#### 3.9.4 后置条件
-- 每次命令执行产生回执（命令、退出码、时长）。
+#### 3.5.5 UI and interactions
 
-#### 3.9.5 界面及交互（Port 声明字段）
+| Element | Type | Required | Default | Validation | Feedback |
+|---------|------|----------|---------|------------|----------|
+| Artifact preview | Embedded preview component | No | - | Type whitelist | Unsupported types get download |
+| Export | Button | No | - | Confirmation [TBD] | Atomic export success prompt |
 
-| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 说明 |
-|------|------|------|--------|---------|------|
-| portId | String | 是 | - | 唯一 | 端口标识 |
-| kind | Enum | 是 | - | cli-sandbox | 端口类型 |
-| binary | String | 是 | - | 存在的可执行文件 | 绑定实现 |
-| timeoutMs | Number | 否 | 600000 [待确认] | > 0 | 单命令超时 |
-| workdir | String | 否 | 环境内默认目录 | 沙箱内路径 | 工作目录 |
+#### 3.5.6 Business flow
+The artifact service (static artifact serving) checks permission →
+preview/export; the browser only ever sees public-origin routes, never
+storage paths.
 
-> 能力边界：端口不设命令白名单；受控语义由沙箱边界保证（环境
-> scrub + 路径禁闭 + timeoutMs），越权路径拒绝并留审计。
+#### 3.5.7 Exceptions / branches
 
-#### 3.9.6 业务流程
-步骤调用端口 → 隔离环境内执行 → 回执（stdout/stderr/退出码）→
-产物落共享目录。
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Artifact missing | Generation failed / cleaned up | Empty state | "Artifact not found" |
+| No permission | Out-of-scope access | Reject + audit | "No access permission" |
 
-#### 3.9.7 异常/分支流程
+#### 3.5.8 Data dictionary (artifact)
 
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 命令超时 | 超过 timeoutMs | 终止命令，回执记失败 | "命令超时" |
-| 非零退出 | 命令失败 | 回执记录，由步骤策略处理 | 展示 stderr |
-| 越权路径 | 访问沙箱外路径 | 拒绝并记录审计 | "路径不可访问" |
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| artifactId | String | Yes | Artifact identifier | "art-..." [TBD] |
+| runId | String | Yes | Owning run | "run-..." |
+| kind | Enum | Yes | report/pdf/dot/bibtex/... | "report" |
+| visibility | Enum | Yes | review-list/non-review etc. [TBD] | "review-list" |
+| size / createdAt | - | Yes | Metadata | - |
 
-#### 3.9.8 数据字典（命令执行回执）
+### 3.6 Users and permissions
 
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| runId / stepId | String | 是 | 归属运行与步骤 | "run-..." |
-| command | String | 是 | 执行的命令 | "pip install ..." |
-| exitCode | Number | 是 | 退出码 | 0 |
-| stdoutRef / stderrRef | String | 否 | 输出产物引用 | "art-..." |
-| durationMs / costUsd | Number | 否 | 时长与成本 [待确认] | 3000 / 0.02 |
+#### 3.6.1 Description
+Authing identity mapping (disableable mode), tenant and Vault
+ownership, role and product-line access control.
 
-> stdoutRef/stderrRef 产物默认脱敏：环境凭据类内容不落产物（见 4.1）。
-
-### 3.10 步级重试与预算止损
-
-#### 3.10.1 描述
-每步可配置 maxAttempts + timeoutMs + budgetUsd；连续失败或预算
-超限后步级终止，交由运行级状态机处理。现状只有运行级重试（失败/
-取消重入同一 run id，跳过已完成步骤），没有步级策略——LLM 类
-步骤的偶发失败会直接拖垮整个运行。
-
-#### 3.10.2 用户故事
+#### 3.6.2 User stories
 ```
-作为提交者，我希望为不稳定步骤配置最大尝试次数与预算上限，
-以便 LLM 类步骤的偶发失败不拖垮整个运行。
+As ops, I want to boot a local environment with
+POLARIS_AUTH_MODE=disabled quickly, so that development and debugging
+do not depend on an external identity service.
 ```
 
-#### 3.10.3 前置条件 / 3.10.4 后置条件
-- 依赖 3.3 运行执行与监控；达到上限后步失败并保留全部尝试回执。
+#### 3.6.3 Preconditions / 3.6.4 Postconditions
+The local disabled mode uses the default user from
+`POLARIS_AUTH_DEFAULT_USER_ID`; production mode completes the code
+exchange via `/auth/callback`.
 
-#### 3.10.5 界面及交互（步级策略字段）
+#### 3.6.5 UI and interactions
+`/welcome` (shows the current auth mode), `/auth/callback`,
+`/settings/user` (basic info / credentials / sessions side by side).
 
-| 字段 | 类型 | 必填 | 默认值 | 校验规则 | 说明 |
-|------|------|------|--------|---------|------|
-| maxAttempts | Number | 否 | 1 [待确认] | >= 1 | 最大尝试次数 |
-| timeoutMs | Number | 否 | - | > 0 | 单次尝试超时 |
-| budgetUsd | Number | 否 | - | > 0 | 步级成本预算 [待确认] |
+#### 3.6.6 Exceptions / branches
+Session expiry → redirect to `/welcome`; identity mapping failure →
+explicit error [TBD].
 
-#### 3.10.6 业务流程
-尝试失败 → 尝试次数 < maxAttempts → 重新执行该步（可选干净环境，
-见 3.8）→ 达到上限或预算超限 → 步失败 → 运行转 failed。
+#### 3.6.7 Data dictionary
+See `apps/docs/site/polaris/user-management.md` (not repeated here).
 
-#### 3.10.7 异常/分支流程
+### 3.7 Tool integration and precheck
 
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 尝试耗尽 | 失败次数达 maxAttempts | 步失败，保留尝试回执 | 详情页展示历次尝试 |
-| 预算超限 | costUsd 超 budgetUsd | 立即止损，步失败 | "步级预算超限" |
+#### 3.7.1 Description
+Tools (tools/) implement Ports; `ops tool-precheck` and
+`/settings/tools` expose the same check-setup result: missing required
+items fail, recommended items come with next-step guidance.
 
-#### 3.10.8 数据字典（步级策略）
+#### 3.7.2 User stories
+```
+As ops, I want a one-click precheck of all tool dependencies before
+startup, so that I quickly find gaps like a missing API key, DISPLAY,
+or Camofox.
+```
 
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| stepId | String | 是 | 策略归属步骤 | "build.env" |
-| maxAttempts | Number | 否 | 最大尝试次数 | 5 |
-| timeoutMs | Number | 否 | 单次尝试超时 | 2700000 |
-| budgetUsd | Number | 否 | 步级成本预算 | 1.0 [待确认] |
+#### 3.7.3 UI and interactions
 
-#### 3.10.9 预算与尝试的层级（gap 修复）
+| Element | Type | Required | Default | Validation | Feedback |
+|---------|------|----------|---------|------------|----------|
+| Precheck result | Grouped list | Yes | - | Required / recommended tiers | Missing items flagged red |
+| Recheck | Button | No | - | - | Re-runs check-setup |
 
-排查 CVE-Genie 对齐时发现的两条平台 gap（论文口径：per-CVE
-预算帽 $5 + 45 分钟，是全模块全局帽，不是单步）：
+#### 3.7.4 Exceptions / branches
+A single tool's check-setup failure affects only that tool; when
+required items are missing, Portal startup still records and reports
+the remaining gaps (startup is not blocked).
 
-| 层级 | 现状 | gap 修复 |
-|------|------|---------|
-| run 级预算帽 | 无（只有步级 budgetUsd/timeoutMs） | 新增 run 级 budgetUsd/timeoutMs：跨全部步骤与 parallel 分支累计，超帽即止损整个运行；env 可配 + 提交时可覆盖 |
-| 步级 maxAttempts 语法 | `.ord` 不表达（parser 只认 timeoutMs/budgetUsd；maxAttempts 走全局 env，不同 workflow 不能各配各的） | parser 接受 `maxAttempts <n>` 作为步 part；步级策略优先读步级值，env 兜底 |
-| flow 级预算声明 | run 级帽仅 env 级，pack 无法自行声明论文的 per-CVE 帽 | flow 级 `budgetUsd <n>`/`timeoutMs <n>` 进 `.ord` 文法（flow 声明部分）；host 侧 flow 声明 > env 兜底；试验包声明论文口径 $5/45min |
-| run 级 maxRuns（run 重试） | 无（run 失败即终，需人工 re-submit） | flow 级 `maxRuns <n>` 进 `.ord` 文法：run 失败后在全新环境重跑整个 run（3.8 生效时），最多 n 次；默认 1（不配不变）；超限 → 稳定错误码 `run-retries-exhausted`。论文 baseline：5（重试收益 0.76 vs 不重试 0.54，5 次内收敛） |
+### 3.8 Isolated environment executor (Vault)
 
-### 3.11 领域模块工具与清单注册（dispatcher 协议）
+#### 3.8.1 Description
+Status quo: Vault-target runs can only be `mode:"mock"` — the engine
+does not enable the tool executor for Vault runs. Goal: real
+`mode:"vault"` — runs execute inside the isolated Vault runtime (with
+the embedded paseo daemon); each attempt runs in a brand-new isolated
+environment (copy-on-write), enabling "clean-environment retry" so
+contamination never propagates across attempts.
 
-#### 3.11.1 描述
-领域模块以通用工具实现；注册进工具清单后 pack 转绿可执行。产品
-只认协议与清单，不认具体领域。工具调用协议：
+Delivery order: this feature and 3.9 are optional (sandbox or no
+sandbox), delivered after 3.10 (step-level retry and budget stop) as
+needed, see 2.4.
+
+#### 3.8.2 User stories
+```
+As an executor, I want retries of failed steps to run in a brand-new
+isolated environment, so that environment contamination left by the
+previous attempt does not affect later attempts.
+As ops, I want intermediate artifacts of long flows retained together
+with environment snapshots, so that recovery starts from a clean state
+after failure.
+```
+
+#### 3.8.3 Preconditions
+
+| Type | Condition |
+|------|-----------|
+| Permission dependency | driver=vault requires vaultId |
+| Feature dependency | 3.2 run submission and admission |
+
+#### 3.8.4 Postconditions
+- The run executes inside an isolated environment; after the attempt,
+  the environment snapshot and artifacts are stored.
+
+#### 3.8.5 UI and interactions
+
+| Element | Type | Required | Default | Validation | Feedback |
+|---------|------|----------|---------|------------|----------|
+| vaultId | Picker | Conditional | - | Owned by the current user | Reject without permission |
+| Retry | Button | No | - | Only when state is failed | New-environment retry prompt |
+
+#### 3.8.6 Business flow
+failed → retry → create a new isolated environment (clean copy) →
+resume from completed steps → re-execute the failed step.
+
+#### 3.8.7 Exceptions / branches
+
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Environment creation failure | Insufficient resources / missing image | Run turns failed, receipts kept | "Failed to create the isolated environment" |
+| Environment timeout | Step-level budget exceeded | Step fails, retry policy triggers | "Execution timed out" |
+
+#### 3.8.8 Data dictionary (isolated environment)
+
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| vaultId | String | Yes | Isolated environment identifier | "vault-..." |
+| baseImage | String | Yes | Base image | "ubuntu-22.04" [TBD] |
+| envState | Enum | Yes | fresh/dirty/snapshotted | "fresh" |
+| snapshotRef | String | No | Environment snapshot reference | "snap-..." [TBD] |
+
+### 3.9 Sandbox CLI execution port
+
+#### 3.9.1 Description
+The only channel for agents to interact with the isolated environment,
+with four primitives: exec / get_file / write_file / list_dir. Declared
+as a Port and bound by the Host (binary/timeoutMs/workdir), with
+command-level receipts (exitCode/stdoutRef/costUsd); Domain Packs never
+hard-code implementation details.
+
+The controlled single boundary: sandbox environment scrub (the process
+environment carries no host credentials) + path confinement (any path
+resolution refuses to escape the environment root) + per-command
+timeoutMs.
+
+Delivery order: this feature is optional (sandbox or no sandbox), pairs
+with 3.8, and is delivered after 3.10 as needed, see 2.4.
+
+#### 3.9.2 User stories
+```
+As a packager, I want to declare a sandbox CLI port so flow steps can
+run controlled commands inside the isolated environment, so that
+domain logic never enters product code.
+As ops, I want to limit the commands a port can execute and its
+timeout, so that I control risk.
+```
+
+#### 3.9.3 Preconditions
+
+| Type | Condition |
+|------|-----------|
+| Data dependency | 3.8 isolated environment available |
+| Permission dependency | Port declared by the Pack, bound by the Host |
+
+#### 3.9.4 Postconditions
+- Every command execution produces a receipt (command, exit code,
+  duration).
+
+#### 3.9.5 UI and interactions (port declaration fields)
+
+| Field | Type | Required | Default | Validation | Description |
+|-------|------|----------|---------|------------|-------------|
+| portId | String | Yes | - | Unique | Port identifier |
+| kind | Enum | Yes | - | cli-sandbox | Port type |
+| binary | String | Yes | - | Existing executable | Bound implementation |
+| timeoutMs | Number | No | 600000 [TBD] | > 0 | Per-command timeout |
+| workdir | String | No | Default directory in the environment | Path inside the sandbox | Working directory |
+
+> Capability boundary: the port has no command whitelist; the
+> controlled semantics come from the sandbox boundary (environment
+> scrub + path confinement + timeoutMs); unauthorized paths are
+> rejected with audit.
+
+#### 3.9.6 Business flow
+A step calls the port → executes inside the isolated environment →
+receipt (stdout/stderr/exit code) → artifacts land in the shared
+directory.
+
+#### 3.9.7 Exceptions / branches
+
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Command timeout | timeoutMs exceeded | Kill the command, receipt records failure | "Command timed out" |
+| Non-zero exit | Command failed | Recorded in the receipt, handled by step policy | Show stderr |
+| Unauthorized path | Access outside the sandbox | Reject + record audit | "Path not accessible" |
+
+#### 3.9.8 Data dictionary (command execution receipt)
+
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| runId / stepId | String | Yes | Owning run and step | "run-..." |
+| command | String | Yes | Executed command | "pip install ..." |
+| exitCode | Number | Yes | Exit code | 0 |
+| stdoutRef / stderrRef | String | No | Output artifact references | "art-..." |
+| durationMs / costUsd | Number | No | Duration and cost [TBD] | 3000 / 0.02 |
+
+> stdoutRef/stderrRef artifacts are redacted by default: environment
+> credential content never lands in artifacts (see 4.1).
+
+### 3.10 Step-level retry and budget stop
+
+#### 3.10.1 Description
+Each step can configure maxAttempts + timeoutMs + budgetUsd; consecutive
+failures or budget overrun terminate the step, handing over to the
+run-level state machine. Status quo: only run-level retry exists
+(failed/cancelled runs re-enter the queue under the same run id,
+skipping completed steps); there is no step policy — occasional
+failures of LLM-like steps sink the entire run.
+
+#### 3.10.2 User stories
+```
+As a submitter, I want to configure a max attempt count and a budget
+cap for unstable steps, so that occasional failures of LLM-like steps
+do not sink the whole run.
+```
+
+#### 3.10.3 Preconditions / 3.10.4 Postconditions
+- Depends on 3.3 run execution and monitoring; after hitting the limit
+  the step fails and all attempt receipts are retained.
+
+#### 3.10.5 UI and interactions (step policy fields)
+
+| Field | Type | Required | Default | Validation | Description |
+|-------|------|----------|---------|------------|-------------|
+| maxAttempts | Number | No | 1 [TBD] | >= 1 | Max attempt count |
+| timeoutMs | Number | No | - | > 0 | Per-attempt timeout |
+| budgetUsd | Number | No | - | > 0 | Step-level cost budget [TBD] |
+
+#### 3.10.6 Business flow
+An attempt fails → attempt count < maxAttempts → re-execute the step
+(optionally in a clean environment, see 3.8) → limit reached or budget
+overrun → step fails → run turns failed.
+
+#### 3.10.7 Exceptions / branches
+
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Attempts exhausted | Failures reach maxAttempts | Step fails, attempt receipts kept | Detail page shows attempt history |
+| Budget overrun | costUsd exceeds budgetUsd | Stop immediately, step fails | "Step-level budget overrun" |
+
+#### 3.10.8 Data dictionary (step policy)
+
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| stepId | String | Yes | Step the policy belongs to | "build.env" |
+| maxAttempts | Number | No | Max attempt count | 5 |
+| timeoutMs | Number | No | Per-attempt timeout | 2700000 |
+| budgetUsd | Number | No | Step-level cost budget | 1.0 [TBD] |
+
+#### 3.10.9 Budget and attempt hierarchy (gap fix)
+
+Two platform gaps found while aligning CVE-Genie (paper scale: per-CVE
+budget cap $5 + 45 minutes, a global cap across the whole module, not a
+single step):
+
+| Tier | Status quo | Gap fix |
+|------|------------|---------|
+| Run-level budget cap | None (only step-level budgetUsd/timeoutMs) | Add run-level budgetUsd/timeoutMs: accrued across all steps and parallel branches, hitting the cap stops the entire run; env-configurable + overridable at submission |
+| Step-level maxAttempts syntax | Not expressed in `.ord` (the parser only knows timeoutMs/budgetUsd; maxAttempts went through a global env, so different workflows could not configure their own) | The parser accepts `maxAttempts <n>` as a step part; step policy reads the step-level value first with env as fallback |
+| Flow-level budget declaration | The run-level cap is env-only, packs cannot declare the paper's per-CVE cap themselves | Flow-level `budgetUsd <n>`/`timeoutMs <n>` enter the `.ord` grammar (flow declaration part); host-side flow declaration > env fallback; the trial pack declares the paper scale $5/45min |
+| Run-level maxRuns (run retries) | None (a failed run is terminal, requiring manual re-submit) | Flow-level `maxRuns <n>` enters the `.ord` grammar: after a run fails, rerun the whole run in a brand-new environment (when 3.8 is active), at most n times; default 1 (unconfigured = unchanged); over the limit → stable error code `run-retries-exhausted`. Paper baseline: 5 (retry benefit 0.76 vs 0.54 without retry, converges within 5) |
+
+### 3.11 Domain module tools and inventory registration (dispatcher protocol)
+
+#### 3.11.1 Description
+Domain modules are implemented as generic tools; once registered into
+the tool inventory the pack turns green and becomes executable. The
+product only knows the protocol and the inventory, never a specific
+domain. Tool invocation protocol:
 `tools/<entrypoint> workflow <command> --input <in.json> --output
-<out.json>`；输入 JSON 信封：
+<out.json>`; input JSON envelope:
 `{runId, tenantId, flowId, stepId, outputFields, workspaceRoot,
-input:{...uses}}`；非零退出即步失败（fail-closed）。
+input:{...uses}}`; a non-zero exit fails the step (fail-closed).
 
-#### 3.11.2 用户故事
+#### 3.11.2 User stories
 ```
-作为打包者，我希望按 dispatcher 协议实现模块工具并注册进工具清单，
-以便 pack 从不可执行转绿。
-```
-
-#### 3.11.3 模块与命令
-
-以当前试验包的四个模块为契约示例（产品按协议执行，不绑领域）：
-
-| 模块 | 命令 | 职责 |
-|------|------|------|
-| cve.processor | fetch | 定位源码、提取受影响版本 |
-| cve.processor | build-knowledge | 结构化知识库（摘要/根因/利用细节） |
-| cve.builder | plan | 环境搭建计划 |
-| cve.builder | setup | 沙箱内执行计划 + critic 纠错循环 |
-| cve.exploiter | exploit | 单次尝试：内部只做 dev+critic 收敛迭代；attempt 级重试（maxAttempts=5）、timeoutMs、budgetUsd 由步级策略（3.10）承担；每次重试的全新隔离环境（3.8 可选项生效时）由步级重试提供 |
-| cve.verifier | verify | CTF flag-retrieval verifier（Verifier Dev + Flag Checker + Verifier Critic 在工具内部；verifier 修订 ≤5 次；论文 weak/strong = 判据质量谱系，非两段流程） |
-
-#### 3.11.4 LLM 依赖与成本口径
-- 模块工具调用 LLM 经 env 注入的二进制与模型（如
-  `POLARIS_CVE_CODEX_BIN`、模型名 [待确认]）；进程环境经沙箱
-  scrub，不继承宿主凭据；
-- 凭据缺失时模块 fail-closed：返回非零退出并注明
-  "LLM provider 不可用"，交由 3.10 步级策略处理；
-- costUsd 口径：优先回读 CLH wrapper（3.14）的计费输出；定价按
-  3.14.8（内置目录 + env 覆盖）解析；预算声明时定价不可解析即
-  fail-closed（V2.6.0），无估算 fallback；
-- 公开参考实现（如 CVE-Genie）仅作方法与 prompt 对照，自带基础
-  设施不移植（能力归属见 3.11.7）。
-
-#### 3.11.5 注册与转绿
-- 注册进 `tools/tool-inventory.json`（entrypoint + commands）；
-- 清单校验（E_FFI_TOOL / E_FFI_COMMAND）通过后，catalog warnings
-  清空，pack 转绿可执行。
-
-#### 3.11.6 异常/分支流程
-
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| 工具缺失 | port 引用的工具不在清单 | catalog 警告；执行 fail-closed | "工具未安装" |
-| 命令缺失 | step command 未提供 | 校验期拒绝 | "命令未定义" |
-| 工具退出非零 | 模块执行失败 | 步失败，保留回执，交由 3.10 步级策略 | 展示 stderr |
-
-#### 3.11.7 平台能力归属（工具不重复实现）
-
-平台已有的横切能力，领域工具一律不重复实现；工具只做领域逻辑的
-单次尝试。attempt 内的领域收敛（如 critic 纠错迭代）是模块自身
-逻辑，不属于平台重试。公开参考实现（如 CVE-Genie）仅作方法与
-prompt 对照，下表右列一律不移植：
-
-| 平台能力 | 归属 | 参考实现中不移植的部分 |
-|----------|------|------------------------|
-| attempt 重试/超时/预算 | 步级策略（3.10） | exploiter 主循环的 attempt 计数、预算判断、退避 |
-| 干净环境（快照/重建） | 隔离执行器（3.8，可选项） | vm_library 的 QEMU 快照管理与环境复用 |
-| 回执/审计/日志 | 控制平面（receipts/时间线/审计） | log.txt、conversations/*.json 自建日志 |
-| LLM 调用与凭据 | CLH 运行时（3.14）+ env 注入 fail-closed（3.11.4） | agentlib 的 llm_api 重试与选型逻辑 |
-| 编排与续跑 | `.ord` v2 结构化编排 + 同 run 重试（跳过已完成步） | main.py 的 pipeline 编排、checkpoint 续跑 |
-| 步间数据传递 | artifacts（outputFields/uses） | shared directory 自建约定 |
-
-#### 3.11.8 pack 自含性（pack-local tools + 完整安装）
-
-动机：每复现一个领域（如一篇论文）就往全局 `tools/` 加一批特有
-工具，tools/ 无限膨胀；且安装物不含 harness presets/prompts——
-pack 不自含，"安装"名不副实。裁决（C 方案，hybrid）：
-
-| 能力 | 归属 | 说明 |
-|------|------|------|
-| LLM harness（CLH） | **全局**（`packages/llm-harness`） | 跨域共享的平台能力，不在 pack 内 |
-| 领域特有工具（如 cve 四工具） | **pack 本地**（`packs/<pack>/tools/`） | 论文/领域特有，随 pack 分发与安装 |
-| 既有全局工具（autoresearch 系） | 全局不动 | 兼容：`tools/` 既有条目原样有效 |
-
-规则：
-- 解析顺序：pack 本地 `packs/<pack>/tools/<entrypoint>` 优先，
-  全局 `tools/<entrypoint>` 兜底；
-- 清单注册：全局 `tools/tool-inventory.json` 的 entrypoint 可指向
-  pack 本地路径（`packs/<pack>/tools/...`）；产品只认协议与清单
-  （3.11.1 不变）；
-- 安装物 = 完整 pack 目录（`main.ord` + `manifest.json` + `tools/`
-  + `harness/`）——presets/prompts 随装 gap 一并修复；
-- 移除 pack 即移除其本地工具；全局工具不受 pack 移除影响。
-
-#### 3.11.9 用户故事（pack 自含）
-```
-作为打包者，我希望领域特有工具随 pack 目录分发与安装，
-以便每复现一个领域不往全局 tools/ 添加工具。
-作为运维，我希望移除 pack 时其本地工具一并移除，
-以便全局工具目录不被领域残留污染。
+As a packager, I want to implement module tools per the dispatcher
+protocol and register them into the tool inventory, so that the pack
+turns green from non-executable.
 ```
 
-### 3.12 产物发布护栏（final 门槛）
+#### 3.11.3 Modules and commands
 
-#### 3.12.1 描述
-终态产物的发布护栏：`final` 有前置条件（证据 registry 非空 + 最少
-篇幅 + provenance 可复现）；不满足时标 `degraded` 并给排查指引。
-上游失败（如 provider 限流解出 0 条 claim）不得级联成空洞终稿照常
-发布。
+Using the current trial pack's four modules as contract examples (the
+product executes per protocol, never bound to a domain):
 
-#### 3.12.2 用户故事
+| Module | Command | Responsibility |
+|--------|---------|----------------|
+| cve.processor | fetch | Locate source code, extract affected versions |
+| cve.processor | build-knowledge | Structured knowledge base (summary / root cause / exploitation details) |
+| cve.builder | plan | Environment setup plan |
+| cve.builder | setup | Execute the plan in the sandbox + critic correction loop |
+| cve.exploiter | exploit | Single attempt: only dev+critic convergence iterations inside; attempt-level retry (maxAttempts=5), timeoutMs, budgetUsd are owned by step policy (3.10); the brand-new isolated environment per retry (when 3.8 is active) is provided by step-level retry |
+| cve.verifier | verify | CTF flag-retrieval verifier (Verifier Dev + Flag Checker + Verifier Critic inside the tool; at most 5 verifier revisions; the paper's weak/strong are a judgment-quality spectrum, not a two-phase flow) |
+
+#### 3.11.4 LLM dependency and cost accounting
+- Module tools call LLMs via a binary and model injected through env
+  (e.g. `POLARIS_CVE_CODEX_BIN`, model name [TBD]); the process
+  environment is scrubbed by the sandbox and inherits no host
+  credentials;
+- When credentials are missing the module fails closed: non-zero exit
+  noting "LLM provider unavailable", handed to 3.10 step policy;
+- costUsd accounting: prefer reading back the CLH wrapper (3.14)
+  billing output; pricing resolves per 3.14.8 (built-in catalog + env
+  override); with a declared budget, unresolvable pricing fails closed
+  (V2.6.0), no estimation fallback;
+- Public reference implementations (e.g. CVE-Genie) serve only as
+  method and prompt comparison; their bundled infrastructure is not
+  ported (capability ownership in 3.11.7).
+
+#### 3.11.5 Registration and turning green
+- Register into `tools/tool-inventory.json` (entrypoint + commands);
+- After inventory validation (E_FFI_TOOL / E_FFI_COMMAND) passes,
+  catalog warnings clear and the pack turns green and becomes
+  executable.
+
+#### 3.11.6 Exceptions / branches
+
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Tool missing | The tool referenced by a port is not in the inventory | Catalog warning; execution fails closed | "Tool not installed" |
+| Command missing | step command not provided | Rejected at validation | "Command undefined" |
+| Tool exits non-zero | Module execution failed | Step fails, receipt kept, handed to 3.10 step policy | Show stderr |
+
+#### 3.11.7 Platform capability ownership (tools never re-implement)
+
+For cross-cutting capabilities the platform already has, domain tools
+never re-implement them; a tool does a single attempt of the domain
+logic. Domain convergence inside an attempt (e.g. critic correction
+iterations) is the module's own logic, not platform retry. Public
+reference implementations (e.g. CVE-Genie) serve only as method and
+prompt comparison; nothing in the right column below is ported:
+
+| Platform capability | Owner | Parts of the reference implementation not ported |
+|---------------------|-------|--------------------------------------------------|
+| Attempt retry / timeout / budget | Step policy (3.10) | The exploiter main loop's attempt counting, budget checks, backoff |
+| Clean environment (snapshot / rebuild) | Isolation executor (3.8, optional) | vm_library's QEMU snapshot management and environment reuse |
+| Receipts / audit / logs | Control plane (receipts / timeline / audit) | log.txt, conversations/*.json self-built logs |
+| LLM calls and credentials | CLH runtime (3.14) + env-injection fail-closed (3.11.4) | agentlib's llm_api retry and model-selection logic |
+| Orchestration and resumption | `.ord` v2 structured orchestration + same-run retry (skips completed steps) | main.py's pipeline orchestration, checkpoint resumption |
+| Inter-step data handoff | artifacts (outputFields/uses) | shared directory self-built conventions |
+
+#### 3.11.8 Pack self-containment (pack-local tools + full install)
+
+Motivation: reproducing each domain (e.g. a paper) adds a batch of
+domain-specific tools to the global `tools/`, which bloats without
+bound; and the installed artifact lacks harness presets/prompts — the
+pack is not self-contained, making "install" a misnomer. Ruling
+(option C, hybrid):
+
+| Capability | Owner | Notes |
+|------------|-------|-------|
+| LLM harness (CLH) | **Global** (`packages/llm-harness`) | Cross-domain shared platform capability, not inside a pack |
+| Domain-specific tools (e.g. the four cve tools) | **Pack-local** (`packs/<pack>/tools/`) | Paper/domain-specific, shipped and installed with the pack |
+| Existing global tools (autoresearch family) | Global, untouched | Compatible: existing `tools/` entries keep working |
+
+Rules:
+- Resolution order: pack-local `packs/<pack>/tools/<entrypoint>` first,
+  global `tools/<entrypoint>` as fallback;
+- Inventory registration: entrypoints in the global
+  `tools/tool-inventory.json` may point at pack-local paths
+  (`packs/<pack>/tools/...`); the product only knows the protocol and
+  the inventory (3.11.1 unchanged);
+- Installed artifact = the full pack directory (`main.ord` +
+  `manifest.json` + `tools/` + `harness/`) — fixing the
+  presets-not-installed gap together;
+- Removing a pack removes its local tools; global tools are unaffected
+  by pack removal.
+
+#### 3.11.9 User stories (pack self-containment)
 ```
-作为提交者，我希望空 registry 或篇幅不达标的产物不被标记为 final，
-以便上游失败不级联成空洞终稿。
-作为对账者，我希望终稿的 provenance（输入配置、摘要、re-run 命令）
-完整可复现，以便排查"为什么短"有入口。
+As a packager, I want domain-specific tools shipped and installed with
+the pack directory, so that reproducing a domain does not add tools to
+the global tools/.
+As ops, I want a pack's local tools removed together with the pack, so
+that the global tool directory is not polluted by domain leftovers.
 ```
 
-#### 3.12.3 护栏口径
+### 3.12 Artifact release guardrails (final gate)
 
-| # | 护栏 | 口径 | 挡的失败 |
-|---|------|------|---------|
-| R-1 | final 前置检查 | registry 非空 + 最少字数；registry 为空时评审 fail（堵"无点可查=空真通过"漏洞） | 限流 → 0 claim → 骨架照常 final |
-| R-2 | 深度门槛 | 段落数/字数进 revise 触发器（软门槛，触发修订而非 fail）；评审加深度维 | 每 claim 一句的清单式报告 |
-| R-3 | provenance 完整性 | source tasks 回写、input digest、re-run command 记录；缺失即 degraded | 排查入口本身不可复现 |
+#### 3.12.1 Description
+Release guardrails for terminal artifacts: `final` has preconditions
+(non-empty evidence registry + minimum length + reproducible
+provenance); when unmet, the artifact is marked `degraded` with
+troubleshooting guidance. Upstream failures (e.g. provider rate
+limiting yielding 0 claims) must not cascade into an empty final report
+published as usual.
 
-#### 3.12.4 异常/分支流程
-
-| 场景 | 触发条件 | 处理方式 | 提示文案 |
-|------|---------|---------|---------|
-| registry 为空 | 解出 0 条 claim | 评审 fail；终稿标 degraded + 排查指引 | "证据不足，见排查指引" |
-| 字数不达标 | 低于最少篇幅 | 触发 revise（软门槛） | 展开修订轮次 |
-| provenance 缺失 | 输入配置/摘要/命令未记录 | 补录；degraded 标记 | "配置未记录" |
-
-#### 3.12.5 数据字典（发布状态）
-
-| 字段名 | 类型 | 必填 | 说明 | 示例值 |
-|--------|------|------|------|--------|
-| status | Enum | 是 | final/degraded/short-report | "final" |
-| registryCount | Number | 是 | 证据 registry 条数 | 35 |
-| bodyWords | Number | 否 | 终稿正文字数 [待确认] | 1240 |
-| provenanceComplete | Boolean | 是 | 输入配置/摘要/命令是否齐全 | true |
-| degradedReason | String | 条件 | status != final 时必填 | "empty-registry" |
-
-### 3.13 DSL v2（结构化编排表达力）
-
-#### 3.13.1 描述
-`.ord` v2 把编排表达力从线性步序升级为结构化控制流：sequence、
-parallel（fork-join）、choice（条件分支）、forEach（按列表产物逐项）、
-while（条件循环）、subflow（flow 组合）。裁决依据：线性链表达不了
-分支/并行/条件编排，编排被迫漏回工具内部，与 3.11.7 能力归属
-矛盾。目标不是 Turing complete，而是结构化表达力——编排模式进
-DSL，计算留在工具。
-
-#### 3.13.2 构造语义
-
-| 构造 | 语义 | 终止性 |
-|------|------|--------|
-| sequence | 线性步序（v1 已有） | 静态保证 |
-| parallel | 分支并发，全部到齐（join）才继续 | 静态 DAG 检查 |
-| choice | 按步输出/输入字段条件分支 | 谓词静态校验 |
-| forEach | 按列表产物逐项执行，maxInFlight 并发上限 | 数据有界 |
-| while | 条件循环，无静态迭代上限 | 步级预算/超时止损兜底 |
-| subflow | 调用另一 flow，DAG 展开复用 | 展开检查 |
-
-#### 3.13.3 while 语义（裁决 2026/10/16）
-while 不设静态迭代上限（放弃静态终止检查）；止损归平台：循环内
-每步执行带步级 timeoutMs/budgetUsd（3.10），超限即步失败并终止
-循环；while 条件只读输入与已完成步的输出字段。
-
-#### 3.13.4 用户故事
+#### 3.12.2 User stories
 ```
-作为打包者，我希望在 .ord 里直接表达分支、并行与循环编排，
-以便编排不被迫写进工具内部（与 3.11.7 能力归属一致）。
+As a submitter, I want artifacts with an empty registry or insufficient
+length not to be marked final, so that upstream failure does not
+cascade into an empty final report.
+As a reconciler, I want the final report's provenance (input config,
+digest, re-run command) complete and reproducible, so that
+investigating "why is it short" has an entry point.
 ```
 
-#### 3.13.5 配套改动
-- interpreter：线性 for 循环 → 拓扑执行 + join 语义；
-- validator：环检测、join 完备性、choice 谓词、subflow 展开检查；
-  不做 while 终止检查；
-- 步级策略（3.10）按分支/迭代各自生效；parallel 分支共享 run 预算；
-- 时间线与图视图渲染并行分支、choice 走向与迭代分组；
-- v1 线性 pack 向后兼容（线性是 v2 的子集）。
+#### 3.12.3 Guardrail definitions
 
-### 3.14 LLM 调用运行时（CLH，configurable LLM harness）
+| # | Guardrail | Definition | Failure blocked |
+|---|-----------|------------|-----------------|
+| R-1 | final precondition check | Non-empty registry + minimum word count; an empty registry fails the review (closes the "nothing to verify = silently passes empty" loophole) | Rate limit → 0 claims → skeleton published as final |
+| R-2 | Depth gate | Paragraph/word counts feed the revise trigger (soft gate, triggers revision rather than fail); the review adds a depth dimension | Checklist-style report with one sentence per claim |
+| R-3 | Provenance completeness | Source tasks written back, input digest, re-run command recorded; missing means degraded | The troubleshooting entry itself is not reproducible |
 
-#### 3.14.1 描述
-平台级 LLM 调用基础设施，消除"每个工具重搭一次 LLM 调用逻辑"
-（文献管线裸撞 429 → 0 claims 的教训）。本体论两层：**LLM 原语**
-（prompt 进 → completion 出，无循环无工具）与 **harness**（给 LLM
-能动性的一切：循环归属、工具执行、上下文管理、解析、沙箱）。参考
-实现的"多个 agent"实为同一 LLM 原语上的多份 harness 配置——契约
-中不引入 "agent" 概念，只有 preset。CLH 三组件：
+#### 3.12.4 Exceptions / branches
 
-| 组件 | 职责 |
-|------|------|
-| preset schema | 步级声明：kind + model + 工具边界 + 循环上限 + 输出契约 + 权限 |
-| compiler | preset + 任务上下文 → 后端 patch/配置 + 渲染 prompt；一次性运行，零持久状态 |
-| wrapper | spawn 后端 → 解析会话日志 → 回执（tokens/costUsd/工具调用数/exit） |
+| Scenario | Trigger | Handling | Message |
+|----------|---------|----------|---------|
+| Empty registry | 0 claims resolved | Review fails; final report marked degraded + troubleshooting guidance | "Insufficient evidence, see troubleshooting guidance" |
+| Insufficient length | Below minimum length | Triggers revise (soft gate) | Expands revision rounds |
+| Missing provenance | Input config / digest / command not recorded | Backfill; degraded mark | "Config not recorded" |
+
+#### 3.12.5 Data dictionary (publication state)
+
+| Field | Type | Required | Description | Example |
+|-------|------|----------|-------------|---------|
+| status | Enum | Yes | final/degraded/short-report | "final" |
+| registryCount | Number | Yes | Evidence registry entry count | 35 |
+| bodyWords | Number | No | Final report body word count [TBD] | 1240 |
+| provenanceComplete | Boolean | Yes | Whether input config / digest / command are complete | true |
+| degradedReason | String | Conditional | Required when status != final | "empty-registry" |
+
+### 3.13 DSL v2 (structured orchestration expressiveness)
+
+#### 3.13.1 Description
+`.ord` v2 upgrades orchestration expressiveness from a linear step
+sequence to structured control flow: sequence, parallel (fork-join),
+choice (conditional branches), forEach (per item of a list artifact),
+while (conditional loop), subflow (flow composition). Ruling rationale:
+a linear chain cannot express branch/parallel/conditional orchestration,
+so orchestration leaks back into tools, contradicting 3.11.7 capability
+ownership. The goal is not Turing completeness but structured
+expressiveness — orchestration patterns live in the DSL, computation
+stays in tools.
+
+#### 3.13.2 Construct semantics
+
+| Construct | Semantics | Termination |
+|-----------|-----------|-------------|
+| sequence | Linear step sequence (already in v1) | Statically guaranteed |
+| parallel | Branches run concurrently, continue only when all arrive (join) | Static DAG check |
+| choice | Conditional branch on step outputs / input fields | Predicates statically validated |
+| forEach | Execute per item of a list artifact, maxInFlight concurrency cap | Data-bounded |
+| while | Conditional loop, no static iteration cap | Step-level budget/timeout stop-loss backstop |
+| subflow | Call another flow, DAG expansion for reuse | Expansion check |
+
+#### 3.13.3 while semantics (ruling 2026/10/16)
+while has no static iteration cap (static termination checking is
+dropped); stop-loss belongs to the platform: every step inside the loop
+executes with step-level timeoutMs/budgetUsd (3.10), and exceeding
+either fails the step and terminates the loop; the while condition
+reads only inputs and outputs of completed steps.
+
+#### 3.13.4 User stories
+```
+As a packager, I want to express branch, parallel, and loop
+orchestration directly in .ord, so that orchestration is not forced
+into tool internals (consistent with 3.11.7 capability ownership).
+```
+
+#### 3.13.5 Companion changes
+- interpreter: linear for loop → topological execution + join
+  semantics;
+- validator: cycle detection, join completeness, choice predicates,
+  subflow expansion checks; no while termination check;
+- Step policy (3.10) applies per branch/iteration; parallel branches
+  share the run budget;
+- Timeline and graph views render parallel branches, choice paths, and
+  iteration grouping;
+- v1 linear packs stay backward compatible (linear is a subset of v2).
+
+### 3.14 LLM invocation runtime (CLH, configurable LLM harness)
+
+#### 3.14.1 Description
+Platform-level LLM invocation infrastructure eliminating "every tool
+rebuilds its own LLM calling logic" (the lesson of the literature
+pipeline hitting 429 raw → 0 claims). Two ontological layers: the
+**LLM primitive** (prompt in → completion out, no loops, no tools) and
+the **harness** (everything that gives an LLM agency: loop ownership,
+tool execution, context management, parsing, sandbox). The reference
+implementation's "multiple agents" are really multiple harness
+configurations over the same LLM primitive — the contract introduces no
+"agent" concept, only presets. CLH has three components:
+
+| Component | Responsibility |
+|-----------|----------------|
+| preset schema | Step-level declaration: kind + model + tool boundary + loop cap + output contract + permission |
+| compiler | preset + task context → backend patch/config + rendered prompt; one-shot run, zero persistent state |
+| wrapper | spawns the backend → parses session logs → receipt (tokens/costUsd/tool call count/exit) |
 
 #### 3.14.2 preset schema
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| kind | Enum | api / bounded / open（见 3.14.3） |
-| model | String | 模型 id，env 解析（档位 light/strong → env 链），缺省 fail-closed（3.11.4） |
-| toolBoundary | Enum | none / read-only / full（dispatcher 四原语） |
-| loopCap | Number | 会话内迭代上限（attempt 内收敛，如参考实现的 60） |
-| outputContract | Enum | precise-json / artifact（工件存在性 + 判据） |
-| permission | Enum | 会话沙箱权限：read-only / workspace-write（后端语义） |
-| timeoutMs | Number | 每 preset 调用超时（api 后端每 call / dsh 会话整体）；未声明用 env 兜底；缺省 fail-closed 于超时即止（V2.5.0：实证 120s env 默认对真实生成太短，pack 需自声明） |
+| Field | Type | Description |
+|-------|------|-------------|
+| kind | Enum | api / bounded / open (see 3.14.3) |
+| model | String | Model id, resolved via env (tier light/strong → env chain); missing fails closed (3.11.4) |
+| toolBoundary | Enum | none / read-only / full (dispatcher four primitives) |
+| loopCap | Number | In-session iteration cap (attempt-internal convergence, e.g. the reference implementation's 60) |
+| outputContract | Enum | precise-json / artifact (artifact existence + criteria) |
+| permission | Enum | Session sandbox permission: read-only / workspace-write (backend semantics) |
+| timeoutMs | Number | Per-preset invocation timeout (api backend per call / dsh whole session); undeclared falls back to env; missing fails closed at the timeout (V2.5.0: the 120s env default proved too short for real generations, packs must declare their own) |
 
-#### 3.14.3 kind 与后端绑定
+#### 3.14.3 kind and backend binding
 
-| kind | 语义 | 后端 |
-|------|------|------|
-| api | 纯 LLM 调用（无工具无循环） | 直连 OpenAI 兼容 endpoint（零 harness 依赖），**流式（SSE）**——非流式长生成会被网关/网络在分钟级掐断（V2.5.0 实证：同一调用非流式 ~5 分钟断连，流式完整产出） |
-| bounded | 只读变换（输入不可变 + 精确输出） | harness 引擎（dsh 打头，read-only 沙箱） |
-| open | 可写执行（工作区即操作对象） | harness 引擎（dsh 打头，workspace-write） |
+| kind | Semantics | Backend |
+|------|-----------|---------|
+| api | Pure LLM call (no tools, no loops) | Direct OpenAI-compatible endpoint (zero harness dependency), **streaming (SSE)** — non-streaming long generations get cut off at minute scale by the gateway/network (V2.5.0 evidence: the same call dropped after ~5 minutes non-streaming, streamed to completion) |
+| bounded | Read-only transform (immutable input + exact output) | Harness engine (dsh first, read-only sandbox) |
+| open | Writable execution (the workspace is the operand) | Harness engine (dsh first, workspace-write) |
 
-后端绑定对实现不可知：dsh 打头（MIT、TS/pnpm 同栈、版本钉死），
-后续可换 codex/opencode/dsh 新版——开发者预览的破坏性变更风险由
-compiler 层隔离（preset 不动，换后端重编译）。选择规则：单 call/
-无工具 → api；只读变换 → bounded；可写/命令执行 → open。
+Backend binding is implementation-agnostic: dsh first (MIT, same TS/pnpm
+stack, version pinned); later swappable to codex/opencode/newer dsh —
+developer-preview breaking-change risk is isolated at the compiler layer
+(preset untouched, recompile with a new backend). Selection rule: single
+call / no tools → api; read-only transform → bounded; writable / command
+execution → open.
 
-#### 3.14.4 归属边界（V1.8.0 一致性）
-1. **编排留平台**：一个 preset = 一次后端调用；dev↔critic 收敛、
-   修订 ≤N 的循环在工具内（attempt 内收敛，非平台重试）；不把多个
-   preset 挂成 harness 引擎的 subagent——编排权不交给引擎；
-2. **循环内 vs 跨 attempt**：引擎内建的调用重试/迭代上限 = attempt
-   内（合法，不重建）；跨 attempt 重试/timeout/budget = 3.10 在
-   CLH 外层承担；call 级退避（429/瞬态断连，指数退避有界重试）=
-   attempt 内收敛，CLH 拥有——一次性失败 fail-closed 不是退避
-   （V2.5.0：实证网关串行限额与分钟级断连，无退避即步失败）；
-3. **回执**：一次会话 = 一个平台 attempt，会话日志解析为一条回执
-   进时间线（M1 语义）；循环细节以日志路径引用，不逐次拆回执；
-4. **凭据**：endpoint/key 经 env 注入，进程环境沙箱 scrub，不入库
-   不入产物（3.11.4）；缺失 fail-closed。
+#### 3.14.4 Ownership boundaries (V1.8.0 consistency)
+1. **Orchestration stays on the platform**: one preset = one backend
+   call; the dev↔critic convergence loop with ≤N revisions lives
+   inside the tool (attempt-internal convergence, not platform retry);
+   never chain multiple presets into the harness engine's subagents —
+   orchestration authority is not handed to the engine;
+2. **In-loop vs cross-attempt**: the engine's built-in invocation
+   retry / iteration cap = attempt-internal (legitimate, not rebuilt);
+   cross-attempt retry/timeout/budget = owned by 3.10 outside the CLH;
+   call-level backoff (429/transient disconnects, bounded exponential
+   backoff) = attempt-internal convergence, owned by CLH — one-shot
+   failure fail-closed is not backoff (V2.5.0: the gateway's serial
+   limits and minute-scale disconnects proven; without backoff the
+   step fails);
+3. **Receipt**: one session = one platform attempt; session logs parse
+   into one receipt entering the timeline (M1 semantics); loop details
+   are referenced by log paths, not split into per-iteration receipts;
+4. **Credentials**: endpoint/key injected via env; the process
+   environment is sandbox-scrubbed; never stored, never in artifacts
+   (3.11.4); missing fails closed.
 
-#### 3.14.5 隔离 seam
-open kind 的命令执行经插件机制替换为 dispatcher adapter（命令走
-dispatcher 协议）；3.8 隔离执行器落地后 dispatcher 指向隔离环境，
-seam 不变。镜像参考实现的 SSH toolbox 模式。
+#### 3.14.5 Isolation seam
+Command execution for the open kind is swapped to a dispatcher adapter
+via the plugin mechanism (commands follow the dispatcher protocol);
+once the 3.8 isolation executor lands, the dispatcher points at the
+isolated environment and the seam is unchanged. Mirrors the reference
+implementation's SSH toolbox mode.
 
-#### 3.14.8 定价目录与预算贯通（V2.6.0 裁决）
+#### 3.14.8 Pricing catalog and budget threading (V2.6.0 ruling)
 
-实证：CVE-2024-4340 对比跑中 costUsd 不可解析（无定价）→
-`stepBudgetSpentUsd` 永不累计 → flow 级 `budgetUsd 5.0` 全程未生效
-（~270 万 tokens 成本对预算机制不可见）。
+Evidence: in the CVE-2024-4340 comparison run costUsd was unresolvable
+(no pricing) → `stepBudgetSpentUsd` never accrued → the flow-level
+`budgetUsd 5.0` never took effect (~2.7M tokens of cost invisible to
+the budget machinery).
 
-| 规则 | 内容 |
-|------|------|
-| 内置定价目录 | CLH 随包内置模型家族官价表（family 前缀匹配 → per-MTok input/cached-input/output），每条带 source URL 与 as-of 日期；价目是数据不是代码，更新走 PR 外科式替换 |
-| 解析顺序 | env 覆盖（`POLARIS_CLH_*_PRICE_*`）> 内置目录 > 无 |
-| fail-closed | flow/run 预算已声明 且 任一在用 preset 的模型定价不可解析 → run 启动前拒绝，稳定码 `CLH_PRICING_UNRESOLVED`；**绝不静默零累计**（解决 3.11.4 [待确认]，不做估算） |
-| 计费口径 | costUsd = input×p_in + cached×p_cached + output×p_out（缓存读计入，目录提供 cached 价）；无目录条目且无 env → 不可解析 |
+| Rule | Content |
+|------|---------|
+| Built-in pricing catalog | CLH ships a built-in official price table for model families (family prefix match → per-MTok input/cached-input/output), each entry with a source URL and as-of date; prices are data, not code, updated via surgical PRs |
+| Resolution order | env override (`POLARIS_CLH_*_PRICE_*`) > built-in catalog > none |
+| fail-closed | A flow/run budget is declared AND any in-use preset model's pricing is unresolvable → reject before run start, stable code `CLH_PRICING_UNRESOLVED`; **never silent zero accrual** (resolves 3.11.4 [TBD], no estimation) |
+| Billing | costUsd = input×p_in + cached×p_cached + output×p_out (cached reads counted; the catalog provides the cached price); no catalog entry and no env → unresolvable |
 
-#### 3.14.6 用户故事
+#### 3.14.6 User stories
 ```
-作为模块工具作者，我希望按 preset 声明 LLM 调用（kind/模型/边界/
-上限/输出契约），以便不重搭退避/计费/凭据/会话逻辑。
-作为打包者，我希望同一 preset 换后端（dsh/codex/opencode/直连）
-只需改绑定，以便引擎更迭不进契约。
+As a module tool author, I want to declare LLM calls per preset
+(kind/model/boundary/cap/output contract), so that I never rebuild
+backoff/billing/credential/session logic.
+As a packager, I want to swap backends (dsh/codex/opencode/direct) for
+the same preset by changing only the binding, so that engine churn
+never enters the contract.
 ```
 
-#### 3.14.7 参考实现落地
-- CVE-Genie 的 9 份 harness 配置映射为 8+1 份 preset（3.11.3 四模块
-  的内部结构），prompts 以 Apache-2.0 引入并注明出处；agentlib 不
-  移植（3.11.7）；
-- 文献管线（LR）迁移为 bounded preset：附件快照、只读约束、精确
-  JSON、stale 会话兜底进 wrapper，消除工具内手写框死逻辑。
+#### 3.14.7 Reference implementation landing
+- CVE-Genie's 9 harness configurations map to 8+1 presets (the internal
+  structure of 3.11.3's four modules); prompts introduced under
+  Apache-2.0 with attribution; agentlib is not ported (3.11.7);
+- The literature pipeline (LR) migrates to a bounded preset: attachment
+  snapshots, read-only constraints, exact JSON, stale-session fallback
+  in the wrapper, eliminating hand-written hard-coded logic inside
+  tools.
 
 ---
 
-## 四、非功能需求（注意事项）
+## 4. Non-functional requirements (notes)
 
-### 4.1 安全与合规
+### 4.1 Security and compliance
 
-| 需求 | 说明 |
-|------|------|
-| 单一公共 origin | 浏览器不可见内部端口/host 路径；编码与垂直入口同源经 Gateway 准入 |
-| 权限模型 | 角色五分 + 成员身份不隐含执行；live 仅运维路径 |
-| 定义完整性 | 运行钉住 pack 版本与摘要，跨状态转换不变 |
-| 审计 | 审批、生命周期动作留审计记录 |
-| 密钥管理 | Provider 凭证经环境文件/env 注入，不入库不入前端 |
-| 产物脱敏 | 命令输出产物默认脱敏；凭据类字段不落产物；产物查看走授权 |
-| 隔离 | Vault 隔离运行时承载不可信执行 |
+| Requirement | Description |
+|-------------|-------------|
+| Single public origin | The browser never sees internal ports / host paths; coding and vertical entries share the origin through Gateway admission |
+| Permission model | Five roles + membership does not imply execution; live is ops-only |
+| Definition integrity | Runs pin the pack version and digest, invariant across state transitions |
+| Audit | Approvals and lifecycle actions leave audit records |
+| Secret management | Provider credentials injected via env files / env, never stored, never in the frontend |
+| Artifact redaction | Command output artifacts redacted by default; credential fields never land in artifacts; artifact viewing goes through authorization |
+| Isolation | The Vault isolated runtime carries untrusted execution |
 
-### 4.2 统计需求（埋点）
+### 4.2 Statistics requirements (tracking)
 
-| 事件名 | 触发时机 | 属性 | 说明 |
-|--------|---------|------|------|
-| page_view | Portal 页面加载 | route, user_id | 访问统计 |
-| run_submit | 运行提交成功 | packId, flowId, driver, mode | 提交行为 |
-| run_action | approve/cancel/retry | runId, action, role | 审批与生命周期 |
-| run_finished | 运行到终态 | runId, status, duration | 成功率/时长 |
-| error_occur | 异常发生 | error_code, route | 异常监控 |
+| Event | Trigger | Properties | Description |
+|-------|---------|------------|-------------|
+| page_view | Portal page load | route, user_id | Visit statistics |
+| run_submit | Run submitted successfully | packId, flowId, driver, mode | Submission behavior |
+| run_action | approve/cancel/retry | runId, action, role | Approval and lifecycle |
+| run_finished | Run reached a terminal state | runId, status, duration | Success rate / duration |
+| error_occur | Exception occurred | error_code, route | Exception monitoring |
 
-> [待确认] 埋点上报通道与留存策略（产品文档未定义上报端）。
+> [TBD] Tracking report channel and retention policy (no reporting
+> endpoint defined in product docs).
 
-### 4.3 性能需求
+### 4.3 Performance requirements
 
-| 指标 | 要求 |
-|------|------|
-| Portal 首屏 | < 2s [待确认] |
-| 运行提交接口 | P99 < 500ms [待确认] |
-| SSE 事件延迟 | < 1s [待确认] |
-| 可用性 | 自托管单机基线，99.5% [待确认] |
-| 回滚 | pack 版本钉住支持回退；自托管经版本回滚恢复 |
+| Metric | Requirement |
+|--------|-------------|
+| Portal first paint | < 2s [TBD] |
+| Run submission API | P99 < 500ms [TBD] |
+| SSE event latency | < 1s [TBD] |
+| Availability | Self-hosted single-machine baseline, 99.5% [TBD] |
+| Rollback | Pinned pack versions support rollback; self-hosted recovers via version rollback |
 
-### 4.4 数据库设计
+### 4.4 Database design
 
-现状：控制存储为 SQLite——`workflow_runs`、`workflow_outbox`、
-capability leases、run 事件（见 workflow.md）。运行/回执/产物/审计
-均落该存储。
+Status quo: the control store is SQLite — `workflow_runs`,
+`workflow_outbox`, capability leases, run events (see workflow.md).
+Runs/receipts/artifacts/audit all land in that store.
 
-隔离执行器（3.8）与步级策略（3.10）需新增表：沙箱环境（env spec、
-快照引用）与步级尝试回执；新增表的索引与保留/清理策略需评审。 [待确认]
+The isolation executor (3.8) and step policy (3.10) need new tables:
+sandbox environments (env spec, snapshot references) and step-level
+attempt receipts; indexes and retention/cleanup policies for the new
+tables need review. [TBD]
 
-### 4.5 系统集成
+### 4.5 System integration
 
-| 对接系统 | 接口方向 | 协议 | 说明 |
-|---------|---------|------|------|
-| Crossref / Semantic Scholar / DeepSec | 调用 | HTTP | 文献检索与扩展 |
-| Camofox 浏览器 | 调用 | HTTP | PDF/页面捕获（可代理） |
-| Codex | 调用 | CLI 进程 | 分析与报告生成会话 |
-| Authing | 调用 | OAuth code 交换 | 身份（可禁用） |
-| paseo daemon | 内嵌 | 进程/FS | agent 会话执行 |
-| Vault runtime | 内嵌 | - | 隔离执行 |
+| System | Interface direction | Protocol | Description |
+|--------|---------------------|----------|-------------|
+| Crossref / Semantic Scholar / DeepSec | Outbound | HTTP | Literature search and extensions |
+| Camofox browser | Outbound | HTTP | PDF / page capture (proxied) |
+| Codex | Outbound | CLI process | Analysis and report generation sessions |
+| Authing | Outbound | OAuth code exchange | Identity (disableable) |
+| paseo daemon | Embedded | Process / FS | Agent session execution |
+| Vault runtime | Embedded | - | Isolated execution |
 
-> 降级策略：外部文献 API 不可用时保留缓存与部分成功（partial）状态；
-> 身份服务不可用时本地禁用模式兜底（仅开发环境）。
-
----
-
-## 五、附录
-
-### 5.1 验收标准与测试要点
-
-| 功能 | 验收条件 | 优先级 |
-|------|---------|--------|
-| Pack 安装 | 合法 .ord 安装成功；非法 DSL 被拒绝并输出错误 | P0 |
-| 运行提交 | REST 提交后产生 queued 运行，钉住版本与摘要 | P0 |
-| 状态机 | queued→running→succeeded/failed/waiting 转换符合 2.2.4 | P0 |
-| 同 run 重试 | failed 重试后 runId 不变且跳过已完成步骤 | P0 |
-| 人工门禁 | waiting 批准后回 running，留审计记录 | P0 |
-| 产物导出 | 导出为原子操作，半途失败不产生残缺文件 | P0 |
-| 工具预检 | 必需项缺失时命令失败；建议项只警告并给下一步 | P1 |
-| 权限 | observer 只读；成员身份不隐含执行 | P0 |
-| live 准入 | 非运维路径无法产生 live 运行 | P0 |
-| 本地 CI | `bash ./scripts/ci-local.sh` 通过 | P0 |
-| 隔离执行器 | driver=vault 运行每次 attempt 使用全新隔离环境：attempt N 在沙箱内写入标记文件后失败，attempt N+1 的沙箱内不存在该标记文件 | P0 |
-| 沙箱端口 | 命令级回执含 exitCode/stdoutRef；越权路径被拒绝并留审计 | P0 |
-| 步级策略 | maxAttempts 耗尽后步失败且保留历次尝试回执；预算超限立即止损 | P0 |
-| 模块工具 | 四模块注册后 `pack list` 无 warnings；缺失任一工具时 pack 不可执行 | P0 |
-| 发布护栏 | 空 registry 时评审 fail、终稿标 degraded；`final` 仅在 registry 非空且 provenance 齐全时可达 | P0 |
-| DSL v2 | parallel 全分支到齐才继续；choice 按谓词走向；while 超步级预算即终止循环；v1 线性 pack 安装不回归 | P0 |
-| 预算层级 | run 级预算超帽即止损整个运行（跨 parallel 分支累计可测）；`.ord` 步级 `maxAttempts <n>` 与 flow 级 `budgetUsd`/`timeoutMs` 被 parser 接受，flow 声明 > env 兜底 | P0 |
-| maxRuns | run 失败后自动重跑（全新环境，3.8 生效时），最多 n 次；默认 1 行为不变；超限错误码 `run-retries-exhausted` | P1 |
-| CLH | 非法 preset 被拒绝；compiler 产物对后端 schema 校验通过；wrapper 解析会话日志产出回执（costUsd/tokens）；api 后端单 call 含计费回读；凭据缺失 fail-closed | P0 |
-| CLH 硬化 | api 后端流式（分钟级长生成不被网关掐断）；429/瞬态退避有界重试（call 级，attempt 内）；per-preset `timeoutMs` 被接受且 env 兜底；步失败错误值进 run 记录 | P0 | 已交付（2026/10/18）：live 跑 6 步全绿实证 |
-| 定价贯通 | 预算声明 + 定价不可解析 → run 启动前 fail-closed（`CLH_PRICING_UNRESOLVED`）；内置目录命中的模型在无 env 时 costUsd 可解析且含缓存读口径 | P0 | 已交付（2026/10/18）：live 跑 costUsd ≈$1.11 真实累计（cached 556K/857K/661K 按目录价） |
-| pack 自含 | pack 本地工具解析优先于全局 `tools/`；安装物含 `tools/` 与 `harness/`；移除 pack 一并移除其本地工具；autoresearch 既有 pack 安装/运行不回归 | P0 |
+> Degradation: when external literature APIs are unavailable, cached
+> results and a partial state are kept; when the identity service is
+> unavailable, the local disabled mode is the fallback (dev only).
 
 ---
 
-## 待确认项清单
+## 5. Appendix
 
-### 必须确认（阻塞开发/评审）
+### 5.1 Acceptance criteria and test points
 
-（当前无：北极星指标与交付顺序均已裁决，见 1.1.3 与 2.6。）
+| Feature | Acceptance condition | Priority |
+|---------|----------------------|----------|
+| Pack install | A valid .ord installs; invalid DSL rejected with errors | P0 |
+| Run submission | REST submission produces a queued run with pinned version and digest | P0 |
+| State machine | queued→running→succeeded/failed/waiting transitions match 2.2.4 | P0 |
+| Same-run retry | After a failed retry, runId is unchanged and completed steps are skipped | P0 |
+| Manual gate | waiting returns to running after approval, with an audit record | P0 |
+| Artifact export | Export is atomic; a mid-way failure never leaves a partial file | P0 |
+| Tool precheck | Missing required items fail the command; recommended items only warn with a next step | P1 |
+| Permissions | observer is read-only; membership does not imply execution | P0 |
+| live admission | Non-ops paths cannot produce live runs | P0 |
+| Local CI | `bash ./scripts/ci-local.sh` passes | P0 |
+| Isolation executor | Every attempt of a driver=vault run uses a brand-new isolated environment: attempt N writes a marker file inside the sandbox and then fails; the marker file does not exist in attempt N+1's sandbox | P0 |
+| Sandbox port | Command-level receipt contains exitCode/stdoutRef; unauthorized paths rejected with audit | P0 |
+| Step policy | After maxAttempts are exhausted the step fails with all attempt receipts retained; budget overrun stops immediately | P0 |
+| Module tools | After the four modules register, `pack list` shows no warnings; missing any tool keeps the pack non-executable | P0 |
+| Release guardrails | Empty registry fails the review and marks the final report degraded; `final` reachable only with a non-empty registry and complete provenance | P0 |
+| DSL v2 | parallel continues only when all branches arrive; choice follows predicates; while terminates the loop when the step-level budget is exceeded; v1 linear pack installs without regression | P0 |
+| Budget hierarchy | A run-level budget over its cap stops the entire run (accrual across parallel branches measurable); `.ord` step-level `maxAttempts <n>` and flow-level `budgetUsd`/`timeoutMs` accepted by the parser, flow declaration > env fallback | P0 |
+| maxRuns | After a run fails it reruns automatically (brand-new environment when 3.8 is active), at most n times; default 1 behavior unchanged; over-limit error code `run-retries-exhausted` | P1 |
+| CLH | Invalid presets rejected; compiler output validates against the backend schema; the wrapper parses session logs into receipts (costUsd/tokens); a single api-backend call includes billing readback; missing credentials fail closed | P0 |
+| CLH hardening | api backend streams (minute-scale long generations not cut off by the gateway); 429/transient bounded backoff (call-level, attempt-internal); per-preset `timeoutMs` accepted with env fallback; step-failure error values enter the run record | P0 | Delivered (2026/10/18): live run all 6 steps green |
+| Pricing threading | Declared budget + unresolvable pricing → fail-closed before run start (`CLH_PRICING_UNRESOLVED`); models hit by the built-in catalog resolve costUsd without env, including cached-read billing | P0 | Delivered (2026/10/18): live run costUsd ≈$1.11 truly accrued (cached 556K/857K/661K at catalog prices) |
+| Pack self-containment | Pack-local tool resolution takes precedence over the global `tools/`; the installed artifact contains `tools/` and `harness/`; removing a pack removes its local tools; existing autoresearch pack install/run without regression | P0 |
 
-### 建议确认（影响完整度）
+---
 
-1. [待确认] 指标目标值：接入人日、成功率、救回率的基线与目标值
-   待 receipts 数据实测后回填。→ 建议：先测基线再定目标。
-   影响：1.1.3 验收、后续复盘基准。
-2. [待确认] 全局提示文案未定义（网络异常/权限不足等）。→ 建议：
-   沿用现有 Portal i18n 文案表（`apps/polaris-portal/src/i18n`）。
-   影响：3.2/3.3 异常分支测试断言。
-3. [待确认] 人工门禁"驳回"后的行为（终止 or 回退重做）。→ 建议：
-   终止并允许 re-submit。影响：3.4.6 流程图与状态机。
-4. [待确认] 审批是否需要超时机制。→ 建议：当前不做超时。影响：3.4.7。
-5. [待确认] Pack 重复安装/被引用移除的策略。→ 建议：幂等安装 +
-   禁止移除被钉住版本。影响：3.1.7。
-6. [待确认] 埋点上报通道。→ 建议：先落 Portal 本地事件日志，后续接
-   `pm-tracking-spec-writer` 输出正式方案。影响：4.2。
+## Items to confirm
 
-### 可后续补充
+### Must confirm (blocks development / review)
 
-7. [待确认] 性能指标建议值（4.3 全部）。→ 建议：以本地 CI 基准
-   实测后回填。影响：验收标准。
-8. [待确认] 运行数据保留与清理策略（4.4）。→ 建议：随隔离执行器
-   存储方案一并评审。影响：运维手册。
+(Currently none: north-star metrics and delivery order are both ruled,
+see 1.1.3 and 2.6.)
+
+### Should confirm (affects completeness)
+
+1. [TBD] Metric targets: baselines and targets for onboarding
+   person-days, success rate, and rescue rate, to be backfilled after
+   receipts data is measured. → Suggestion: measure the baseline before
+   setting targets. Impact: 1.1.3 acceptance, later review baselines.
+2. [TBD] Global prompt messages undefined (network errors, insufficient
+   permission, etc.). → Suggestion: reuse the existing Portal i18n
+   message table (`apps/polaris-portal/src/i18n`). Impact: 3.2/3.3
+   exception-branch test assertions.
+3. [TBD] Behavior after a manual-gate "reject" (terminate or roll back
+   and redo). → Suggestion: terminate and allow re-submit. Impact:
+   3.4.6 flow diagram and state machine.
+4. [TBD] Whether approval needs a timeout. → Suggestion: no timeout
+   for now. Impact: 3.4.7.
+5. [TBD] Policy for duplicate pack installs / removing referenced
+   packs. → Suggestion: idempotent install + forbid removing pinned
+   versions. Impact: 3.1.7.
+6. [TBD] Tracking report channel. → Suggestion: start with a Portal
+   local event log, then adopt a formal plan from
+   `pm-tracking-spec-writer`. Impact: 4.2.
+
+### Can be added later
+
+7. [TBD] Suggested performance metric values (all of 4.3). →
+   Suggestion: measure against the local CI baseline, then backfill.
+   Impact: acceptance criteria.
+8. [TBD] Run data retention and cleanup policy (4.4). → Suggestion:
+   review together with the isolation executor storage design. Impact:
+   ops manual.

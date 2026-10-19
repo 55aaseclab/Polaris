@@ -1,207 +1,217 @@
-# Polaris 2026 Q4 路线图
+# Polaris 2026 Q4 Roadmap
 
-版本号：V1.9.0
+Version: V1.9.0
 
-| 版本   | 时间       | 修订人    | 备注                                |
-|--------|-----------|-----------|-------------------------------------|
-| V1.0.0 | 2026/10/16 | opencode | 依据 PRD V1.5.0 切片与排期；M1 先行 |
-| V1.1.0 | 2026/10/16 | opencode | 依据 PRD V1.6.0 新增切片 R（报告深度与护栏）；切片 3 移出本周期 |
-| V1.2.0 | 2026/10/16 | opencode | 依据 PRD V2.0.0 新增切片 D（DSL v2 结构化编排），插队 M2 前；M2 顺延 W5、M-R 保留 W6 |
-| V1.3.0 | 2026/10/16 | opencode | 依据 PRD V2.1.0 新增切片 D2（预算层级：run 级预算帽 + 步级 maxAttempts 语法），插队 M2 前；对账 M-D 翻绿 |
-| V1.4.0 | 2026/10/16 | opencode | 依据 PRD V2.2.0 D2 范围扩上 flow 级预算声明；对账 D2 已交付部分 |
-| V1.5.0 | 2026/10/17 | opencode | 依据 PRD V2.3.0 新增切片 D3（LLM 调用运行时 CLH 基础设施），插队 M2 前；M2 改为薄工具跑在 CLH 上 |
-| V1.6.0 | 2026/10/17 | opencode | 依据 PRD V2.4.0 新增切片 D4（pack 自含：pack-local tools + 完整安装），M2 后执行；M2/2b 对账翻绿 |
-| V1.7.0 | 2026/10/17 | opencode | 依据 PRD V2.5.0 新增切片 D5（CLH 硬化：流式 + 退避 + per-preset timeoutMs + 错误值贯通）——首次 CVE 对比跑实证四缺陷；R 对账翻绿 |
-| V1.8.0 | 2026/10/18 | opencode | 依据 PRD V2.6.0 新增切片 D6（定价目录 + 预算 fail-closed）——二次对比跑实证预算帽静默失效；D5 对账翻绿 |
-| V1.9.0 | 2026/10/18 | opencode | 依据 PRD 3.10.9 新增切片 D7（run 级 maxRuns——run 重试计数）；评测校准（1 CVE × 3 runs）开工；版本 0.5.0 发布 |
+| Version | Date       | Author    | Notes |
+|---------|-----------|-----------|-------|
+| V1.0.0 | 2026/10/16 | opencode | Sliced and scheduled per PRD V1.5.0; M1 first |
+| V1.1.0 | 2026/10/16 | opencode | Added slice R (report depth and guardrails) per PRD V1.6.0; slice 3 moved out of this cycle |
+| V1.2.0 | 2026/10/16 | opencode | Added slice D (DSL v2 structured orchestration) per PRD V2.0.0, cut ahead of M2; M2 shifted to W5, M-R kept at W6 |
+| V1.3.0 | 2026/10/16 | opencode | Added slice D2 (budget hierarchy: run-level budget cap + step-level maxAttempts syntax) per PRD V2.1.0, cut ahead of M2; reconciled M-D turns green |
+| V1.4.0 | 2026/10/16 | opencode | D2 scope widened to flow-level budget declarations per PRD V2.2.0; reconciled D2's delivered portion |
+| V1.5.0 | 2026/10/17 | opencode | Added slice D3 (LLM invocation runtime CLH infrastructure) per PRD V2.3.0, cut ahead of M2; M2 changed to thin tools on CLH |
+| V1.6.0 | 2026/10/17 | opencode | Added slice D4 (pack self-containment: pack-local tools + full install) per PRD V2.4.0, executed after M2; M2/2b reconciled green |
+| V1.7.0 | 2026/10/17 | opencode | Added slice D5 (CLH hardening: streaming + backoff + per-preset timeoutMs + error-value threading) per PRD V2.5.0 — first CVE comparison run proved four defects; R reconciled green |
+| V1.8.0 | 2026/10/18 | opencode | Added slice D6 (pricing catalog + budget fail-closed) per PRD V2.6.0 — second comparison run proved the budget cap silently inert; D5 reconciled green |
+| V1.9.0 | 2026/10/18 | opencode | Added slice D7 (run-level maxRuns — run retry count) per PRD 3.10.9; evaluation calibration (1 CVE × 3 runs) starts; version 0.5.0 released |
 
-周期：2026/10/19 ~ 2026/11/27（6 周，3 个迭代）。
-负责人：Qiang Liu（单人维护）。
-依据：[Polaris PRD](./prd) V2.6.0（唯一 ground truth）。
-
----
-
-## 1. 目标（北极星映射替换成本三维，见 PRD 1.1.3）
-
-| # | 目标（O） | 关键结果（KR） | 优先级 | 切片 |
-|---|----------|---------------|--------|------|
-| O1 | 让 LLM 类步骤可依赖（降低迁移成本，北极星 2） | KR1: 每步支持 maxAttempts + timeoutMs + budgetUsd | P0 | 切片 1 |
-| O1 | | KR2: 运行成功率 ≥ 90% [待确认] | P0 | 切片 1, 2 |
-| O1 | | KR3: 救回率可测且有基线 | P0 | 切片 1 |
-| O1 | | KR4: LLM 调用在真实网关下可依赖（流式 + call 级退避，PRD 3.14 V2.5.0） | P0 | 切片 D5 |
-| O2 | 领域接入成本下降（降低学习成本，北极星 1） | KR1: 四模块工具注册后 pack list 无 warnings | P0 | 切片 2 |
-| O2 | | KR2: API 幂等键（重复 POST 返回同一 run） | P0 | 切片 2b |
-| O2 | | KR3: 模块工具零手写 LLM 调用逻辑（CLH preset 化，PRD 3.14） | P0 | 切片 D3 |
-| O2 | | KR4: pack 自含——领域特有工具随 pack 分发，全局 tools/ 不膨胀（PRD 3.11.8） | P0 | 切片 D4 |
-| O3 | 可信隔离执行（降低信任成本，北极星 3） | KR1: 污染断言通过 | P1 可选 | 切片 3 |
+Cycle: 2026/10/19 ~ 2026/11/27 (6 weeks, 3 iterations).
+Owner: Qiang Liu (solo maintainer).
+Basis: [Polaris PRD](./prd) V2.6.0 (sole ground truth).
 
 ---
 
-## 2. 故事地图（骨架 + 横切切片）
+## 1. Goals (north star mapped to switching-cost dimensions, see PRD 1.1.3)
 
-Backbone（用户旅程："一个工作流领域从想法到长期运行"）：
+| # | Goal (O) | Key results (KR) | Priority | Slices |
+|---|----------|------------------|----------|--------|
+| O1 | Make LLM-like steps dependable (lower migration cost, north star 2) | KR1: every step supports maxAttempts + timeoutMs + budgetUsd | P0 | Slice 1 |
+| O1 | | KR2: run success rate ≥ 90% [TBD] | P0 | Slices 1, 2 |
+| O1 | | KR3: rescue rate measurable with a baseline | P0 | Slice 1 |
+| O1 | | KR4: LLM calls dependable under a real gateway (streaming + call-level backoff, PRD 3.14 V2.5.0) | P0 | Slice D5 |
+| O2 | Domain onboarding cost falls (lower learning cost, north star 1) | KR1: after the four module tools register, pack list shows no warnings | P0 | Slice 2 |
+| O2 | | KR2: API idempotency key (duplicate POST returns the same run) | P0 | Slice 2b |
+| O2 | | KR3: module tools with zero hand-written LLM calling logic (CLH presets, PRD 3.14) | P0 | Slice D3 |
+| O2 | | KR4: pack self-containment — domain-specific tools ship with the pack, global tools/ stops growing (PRD 3.11.8) | P0 | Slice D4 |
+| O3 | Trusted isolated execution (lower trust cost, north star 3) | KR1: pollution assertion passes | P1 optional | Slice 3 |
+
+---
+
+## 2. Story map (skeleton + cross-cutting slices)
+
+Backbone (user journey: "a workflow domain from idea to long-running
+operation"):
 
 ```text
-声明领域 → 接入工具 → 预检环境 → 提交运行 → 执行监控
-        → 审批门禁 → 取产物 → 失败恢复 → 对账追溯
+Declare domain → integrate tools → precheck environment → submit run →
+        execute and monitor → approval gate → collect artifacts →
+        failure recovery → reconcile and trace
 ```
 
-| 活动 | 已有 ✓ | 缺 ⬜ |
-|------|--------|-------|
-| 声明领域 | Pack 安装/移除、流程启停 | — |
-| 接入工具 | dispatcher 协议契约、领域模块工具+清单注册（M2 已交付）、pack 本地工具（D4 已交付） | — |
-| 预检环境 | tool-precheck | — |
-| 提交运行 | Portal/API 提交、driver 约束、API 幂等键（M2 已交付） | — |
-| 执行监控 | host 持久运行、时间线 SSE、步级重试+预算止损（M1 已交付） | live 准入（P1） |
-| 审批门禁 | 人工门禁+审计 | — |
-| 取产物 | 受控预览/原子导出 | — |
-| 失败恢复 | 同 run 重试（跳过已完成步骤） | 干净重试（P1 可选） |
-| 对账追溯 | SQLite 控制存储、回执/审计 | — |
+| Activity | Have ✓ | Missing ⬜ |
+|----------|--------|-----------|
+| Declare domain | Pack install/remove, flow enable/disable | — |
+| Integrate tools | Dispatcher protocol contract, domain module tools + inventory registration (delivered in M2), pack-local tools (delivered in D4) | — |
+| Precheck environment | tool-precheck | — |
+| Submit run | Portal/API submission, driver constraints, API idempotency key (delivered in M2) | — |
+| Execute and monitor | Persistent host runs, timeline SSE, step-level retry + budget stop (delivered in M1) | live admission (P1) |
+| Approval gate | Manual gate + audit | — |
+| Collect artifacts | Controlled preview / atomic export | — |
+| Failure recovery | Same-run retry (skips completed steps) | Clean retry (P1 optional) |
+| Reconcile and trace | SQLite control store, receipts / audit | — |
 
-横切切片：每条横跨 backbone 端到端可验证，不纵切单模块。
+Cross-cutting slices: each spans the backbone end to end and is
+verifiable, never a vertical cut through a single module.
 
-| 切片 | 横跨活动 | 端到端验证 | 估 | 状态 |
-|------|---------|-----------|-----|------|
-| 0 walking skeleton | 全链 | AutoResearch host run（已交付） | — | 已完成 |
-| 1 LLM 步骤可依赖（PRD 3.10） | 提交/监控/恢复/追溯 | 不稳定步骤偶发失败不拖垮运行；救回率可测 | 3~5 人天 | 已完成（2026/10/16 提前交付，9d8c9035） |
-| D DSL v2 结构化编排（PRD 3.13） | 声明/接入/提交/执行（全链编排面） | parallel 全分支到齐才继续；choice 按谓词走向；while 超步级预算即终止；v1 线性 pack 不回归 | 8~11 人天 | 已完成（2026/10/16 提前交付：1a9e4cac 引擎 + aa69f4c9 试验包重写） |
-| D2 预算层级（PRD 3.10.9） | 全链（run 级止损 + 步级/flow 级预算配置） | run 级预算超帽即止损整个运行（跨分支累计可测）；`.ord` 步级 maxAttempts 与 flow 级 budgetUsd/timeoutMs 被 parser 接受，flow 声明 > env 兜底 | 2~3 人天 | 已完成（2026/10/16 提前交付：179d43d2） |
-| D3 LLM 调用运行时（PRD 3.14） | 接入/执行/追溯（CLH 基础设施） | 非法 preset 被拒；compiler 产物对 dsh schema 校验通过；wrapper 解析会话日志产出回执；api 后端单 call 计费回读；凭据缺失 fail-closed；8 份 preset（CVE-Genie 映射）编译干净 | 2~3 人天 | 已完成（2026/10/17 提前交付，eaad6ebd） |
-| 2 模块工具转绿（PRD 3.11） | 声明/接入/提交/执行/产物 | 四模块注册后 pack list 无 warnings，端到端全绿 | 5~7 人天 | 已完成（2026/10/17 提前交付，90fcf6df：四薄工具跑在 CLH 上） |
-| D4 pack 自含（PRD 3.11.8） | 声明/接入/执行（分发面） | cve 四工具移入 pack 本地 `tools/`；解析 pack 本地优先全局兜底；安装物含 tools/+harness/；移除 pack 一并移除本地工具；autoresearch 不回归 | 1~2 人天 | 已完成（2026/10/17 提前交付，c931ac89） |
-| R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 已完成（2026/10/17 提前交付，6d22d71d） |
-| D5 CLH 硬化（PRD 3.14 V2.5.0） | 接入/执行/追溯 | api 后端流式（分钟级长生成完整产出）；429/瞬态退避有界重试；per-preset timeoutMs 进 preset 且 env 兜底；步失败错误值进 run 记录；重跑 CVE-2024-4340 全流程过 build-knowledge | 1~2 人天 | 已完成（2026/10/17 提前交付；重跑 6 步全绿，verified=true + flag） |
-| D6 定价目录与预算 fail-closed（PRD 3.14.8） | 接入/执行/追溯 | 内置官价目录（family → per-MTok，source+as-of）；env > 目录 > 无；预算声明 + 定价不可解析 → run 启动前 `CLH_PRICING_UNRESOLVED`；缓存读计入口径；重跑验证预算帽真实累计 | ~1 人天 | 已完成（2026/10/18 提前交付；live 跑 costUsd ≈$1.11 累计 + verified=true） |
-| D7 run 级 maxRuns（PRD 3.10.9） | 执行/恢复 | flow 级 `maxRuns <n>` 进 `.ord` 文法；run 失败后整 run 重跑（默认 1 行为不变；3.8 生效时每轮全新环境）；超限 `run-retries-exhausted`；重跑验证重试救回 | ~0.5 人天 | 未开始（步级重试生产已实证救回，run 级补齐同家族） |
-| 3 隔离执行（PRD 3.8/3.9，可选） | 接入/执行/恢复 | 污染断言通过；干净重试可测 | 3~5 人天 | 移出本周期 |
-| 4 丰满层（远期） | live UX/性能基线 | — | — | 远期 |
+| Slice | Activities spanned | End-to-end verification | Est. | Status |
+|-------|--------------------|-------------------------|------|--------|
+| 0 walking skeleton | Full chain | AutoResearch host run (delivered) | — | Done |
+| 1 LLM steps dependable (PRD 3.10) | Submit / monitor / recover / trace | Occasional failures of unstable steps do not sink the run; rescue rate measurable | 3~5 person-days | Done (delivered early 2026/10/16, 9d8c9035) |
+| D DSL v2 structured orchestration (PRD 3.13) | Declare / integrate / submit / execute (full orchestration surface) | parallel continues only when all branches arrive; choice follows predicates; while terminates when the step-level budget is exceeded; v1 linear pack no regression | 8~11 person-days | Done (delivered early 2026/10/16: 1a9e4cac engine + aa69f4c9 trial pack rewrite) |
+| D2 budget hierarchy (PRD 3.10.9) | Full chain (run-level stop-loss + step/flow budget configuration) | Run-level budget over its cap stops the entire run (cross-branch accrual measurable); `.ord` step-level maxAttempts and flow-level budgetUsd/timeoutMs accepted by the parser, flow declaration > env fallback | 2~3 person-days | Done (delivered early 2026/10/16: 179d43d2) |
+| D3 LLM invocation runtime (PRD 3.14) | Integrate / execute / trace (CLH infrastructure) | Invalid presets rejected; compiler output validates against the dsh schema; the wrapper parses session logs into receipts; api backend single-call billing readback; missing credentials fail closed; 8 presets (CVE-Genie mapping) compile cleanly | 2~3 person-days | Done (delivered early 2026/10/17, eaad6ebd) |
+| 2 module tools turn green (PRD 3.11) | Declare / integrate / submit / execute / artifacts | After the four modules register, pack list shows no warnings, end to end all green | 5~7 person-days | Done (delivered early 2026/10/17, 90fcf6df: four thin tools on CLH) |
+| D4 pack self-containment (PRD 3.11.8) | Declare / integrate / execute (distribution surface) | The four cve tools move into pack-local `tools/`; pack-local-first resolution with global fallback; the install contains tools/ + harness/; removing the pack removes local tools; autoresearch no regression | 1~2 person-days | Done (delivered early 2026/10/17, c931ac89) |
+| R report depth and guardrails (PRD 3.12) | Analysis / report / review | Empty registry no longer passes hollow; final report length distinguishable; provenance reproducible | ≈ 3.5 person-days | Done (delivered early 2026/10/17, 6d22d71d) |
+| D5 CLH hardening (PRD 3.14 V2.5.0) | Integrate / execute / trace | api backend streams (minute-scale long generations complete); 429/transient bounded backoff; per-preset timeoutMs in presets with env fallback; step-failure error values enter the run record; the CVE-2024-4340 rerun passes build-knowledge end to end | 1~2 person-days | Done (delivered early 2026/10/17; rerun all 6 steps green, verified=true + flag) |
+| D6 pricing catalog and budget fail-closed (PRD 3.14.8) | Integrate / execute / trace | Built-in official price catalog (family → per-MTok, source+as-of); env > catalog > none; declared budget + unresolvable pricing → `CLH_PRICING_UNRESOLVED`; cached reads counted in billing; the rerun verifies the budget cap truly accrues | ~1 person-day | Done (delivered early 2026/10/18; live run costUsd ≈$1.11 accrued + verified=true) |
+| D7 run-level maxRuns (PRD 3.10.9) | Execute / recover | Flow-level `maxRuns <n>` enters the `.ord` grammar; after a run fails the whole run reruns (default 1 behavior unchanged; a brand-new environment each round when 3.8 is active); over-limit `run-retries-exhausted`; the rerun verifies retry rescue | ~0.5 person-day | Not started (step-level retry proven to rescue in production; run-level completes the same family) |
+| 3 isolated execution (PRD 3.8/3.9, optional) | Integrate / execute / recover | Pollution assertion passes; clean retry measurable | 3~5 person-days | Moved out of this cycle |
+| 4 flesh-out layer (long term) | live UX / performance baseline | — | — | Long term |
 
-切片 R 的三个修复项（PRD 3.12 护栏口径）：
+The three fixes of slice R (PRD 3.12 guardrail definitions):
 
-| # | 修复项 | 挡的失败 | 估 |
-|---|--------|---------|-----|
-| R-1 final 前置护栏 | claims=0 或字数不达标时评审 fail、终稿标 degraded，不得 final | 429 → 0 claims → 骨架照常 final | ~1 人天 |
-| R-2 深度门槛 | 段落数/字数进 revise 触发器；评审加深度维 | 每 claim 一句的清单式报告 | ~1.5 人天 |
-| R-3 provenance 修复 | source tasks 回写、input digest、re-run command | 排查入口本身不可复现 | ~1 人天 |
+| # | Fix | Failure blocked | Est. |
+|---|-----|-----------------|------|
+| R-1 final precondition guardrail | Review fails and the final report is marked degraded when claims=0 or length falls short; never final | 429 → 0 claims → skeleton published as final | ~1 person-day |
+| R-2 depth gate | Paragraph/word counts feed the revise trigger; the review adds a depth dimension | Checklist-style report with one sentence per claim | ~1.5 person-days |
+| R-3 provenance fix | Source tasks written back, input digest, re-run command | The troubleshooting entry itself is not reproducible | ~1 person-day |
 
 ---
 
-## 3. 甘特图
+## 3. Gantt chart
 
 ```mermaid
 gantt
-    title Polaris 2026 Q4 切片排期（单人串行，3 迭代）
+    title Polaris 2026 Q4 slice schedule (solo serial, 3 iterations)
     dateFormat YYYY-MM-DD
     axisFormat %m/%d
-    section 引擎
-    切片 1 步级重试与预算止损 :done, a1, 2026-10-16, 1d
-    切片 D DSL v2 引擎（parser/validator/interpreter） :done, a2, 2026-10-16, 1d
-    切片 D2 预算层级（run 帽 + maxAttempts 语法） :done, a4, 2026-10-16, 1d
-    切片 D3 CLH 基础设施（preset/compiler/wrapper/seam） :done, a5, 2026-10-17, 1d
-    切片 2b API 幂等键 :done, a3, 2026-10-17, 1d
-    section 工具
-    切片 2 四模块工具与注册（新 DSL） :done, b1, 2026-10-17, 1d
-    切片 D4 pack 自含（pack-local tools + 完整安装） :done, b2, 2026-10-17, 1d
-    section 报告
-    切片 R 报告深度与护栏 :done, r1, 2026-10-17, 1d
-    切片 D5 CLH 硬化（流式 + 退避 + per-preset timeout） :done, c1, 2026-10-17, 1d
-    切片 D6 定价目录与预算 fail-closed :done, c2, 2026-10-18, 1d
-    切片 D7 run 级 maxRuns（run 重试计数） :c3, 2026-10-18, 1d
-    section 里程碑
-    M1 LLM 步骤可依赖 :milestone, m1, 2026-10-16, 0d
-    M-D DSL v2 结构化编排 :milestone, md, 2026-10-16, 0d
-    M-D2 预算层级 :milestone, md2, 2026-10-16, 0d
-    M-D3 CLH 基础设施 :milestone, md3, 2026-10-17, 0d
-    M2 模块工具转绿 :milestone, m2, 2026-10-17, 0d
-    M-D4 pack 自含 :milestone, md4, 2026-10-17, 0d
-    M-R 报告深度与护栏 :milestone, mr, 2026-10-17, 0d
-    M-D5 CLH 硬化 :milestone, md5, 2026-10-17, 0d
-    M-D6 定价贯通 :milestone, md6, 2026-10-18, 0d
-    M-D7 run 级 maxRuns :milestone, md7, 2026-10-19, 0d
+    section Engine
+    Slice 1 step-level retry and budget stop :done, a1, 2026-10-16, 1d
+    Slice D DSL v2 engine (parser/validator/interpreter) :done, a2, 2026-10-16, 1d
+    Slice D2 budget hierarchy (run cap + maxAttempts syntax) :done, a4, 2026-10-16, 1d
+    Slice D3 CLH infrastructure (preset/compiler/wrapper/seam) :done, a5, 2026-10-17, 1d
+    Slice 2b API idempotency key :done, a3, 2026-10-17, 1d
+    section Tools
+    Slice 2 four module tools and registration (new DSL) :done, b1, 2026-10-17, 1d
+    Slice D4 pack self-containment (pack-local tools + full install) :done, b2, 2026-10-17, 1d
+    section Reports
+    Slice R report depth and guardrails :done, r1, 2026-10-17, 1d
+    Slice D5 CLH hardening (streaming + backoff + per-preset timeout) :done, c1, 2026-10-17, 1d
+    Slice D6 pricing catalog and budget fail-closed :done, c2, 2026-10-18, 1d
+    Slice D7 run-level maxRuns (run retry count) :c3, 2026-10-18, 1d
+    section Milestones
+    M1 LLM steps dependable :milestone, m1, 2026-10-16, 0d
+    M-D DSL v2 structured orchestration :milestone, md, 2026-10-16, 0d
+    M-D2 budget hierarchy :milestone, md2, 2026-10-16, 0d
+    M-D3 CLH infrastructure :milestone, md3, 2026-10-17, 0d
+    M2 module tools turn green :milestone, m2, 2026-10-17, 0d
+    M-D4 pack self-containment :milestone, md4, 2026-10-17, 0d
+    M-R report depth and guardrails :milestone, mr, 2026-10-17, 0d
+    M-D5 CLH hardening :milestone, md5, 2026-10-17, 0d
+    M-D6 pricing threaded through :milestone, md6, 2026-10-18, 0d
+    M-D7 run-level maxRuns :milestone, md7, 2026-10-19, 0d
 ```
 
-> M3（可信隔离执行，可选项）移出本周期，连同切片 3 推迟到下一
-> 切片窗口。
-> 切片 R 依据 PRD 第 3.12 节：报告质量是当前活跃问题，插队占用
-> 切片 3 的功能缓冲位（等量置换，不扩产能）。
-> 切片 D 依据 PRD 第 3.13 节：DSL 表达力不足使编排被迫漏回工具
-> （与 3.11.7 矛盾），插队 M2 前以免工具写完再迁移。
-> 切片 D3 依据 PRD 第 3.14 节：LLM 调用逻辑每工具重搭是横切缺口
-> （文献管线裸撞 429 教训），插队 M2 前——M2 的四个模块工具改为
-> 薄工具跑在 CLH 上，agentlib 式循环由 dsh 引擎接管。
+> M3 (trusted isolated execution, optional) moves out of this cycle,
+> together with slice 3, into the next slice window.
+> Slice R follows PRD section 3.12: report quality is the current
+> active problem, cut ahead into slice 3's feature buffer slot
+> (equal-size swap, no capacity added).
+> Slice D follows PRD section 3.13: DSL expressiveness gaps force
+> orchestration to leak into tools (contradicting 3.11.7), so it cuts
+> ahead of M2 to avoid migrating tools after they are written.
+> Slice D3 follows PRD section 3.14: per-tool rebuilds of LLM calling
+> logic are a cross-cutting gap (the literature pipeline hitting 429
+> raw), so it cuts ahead of M2 — M2's four module tools become thin
+> tools on CLH, with agentlib-style loops taken over by the dsh engine.
 
 ---
 
-## 4. 里程碑
+## 4. Milestones
 
-| 里程碑 | 日期 | 交付物 | 成功指标 | 状态 |
-|--------|------|--------|----------|------|
-| M1 LLM 步骤可依赖 | 2026/10/16（提前） | 步级策略引擎（maxAttempts/timeoutMs/budgetUsd）、历次尝试回执与时间线 attempt 分组、合成 fixture 测试、全量回归通过 | 北极星：救回率可测且有基线；护栏：既有 15 个 workflow-control 测试不回归 | 🟢 已交付（9d8c9035）；22/22 测试（7 新 step-policy + 15 既有零回归），救回率可测 |
-| M-D DSL v2 结构化编排 | W3 2026/11/06 | 六构造（sequence/parallel/choice/forEach/while/subflow）、拓扑执行 interpreter、DAG 校验、步级策略按分支生效、时间线/图渲染、v1 线性兼容 | 北极星：编排不再被迫漏回工具；护栏：v1 线性 pack 安装/运行不回归 | 🟢 2026/10/16 提前交付（1a9e4cac 引擎 22/22 + aa69f4c9 试验包重写；surfaces 45/45） |
-| M-D2 预算层级 | W3 2026/11/06 | run 级预算帽（跨步骤/分支累计止损）+ `.ord` 步级 maxAttempts 语法与步级策略接线 | 北极星：run 级止损可测；护栏：无 run 帽配置时行为不变 | 🟢 2026/10/16 提前交付（179d43d2；workflow 26/26 + apps 31/31） |
-| M-D3 CLH 基础设施 | W3 2026/11/06 | `packages/llm-harness`（preset schema + compiler + wrapper + api 后端 + dispatcher seam）、8 份 preset（CVE-Genie 映射，prompts Apache-2.0 注明出处）、合成 fixture 测试 | 北极星：模块工具零手写 LLM 调用逻辑；护栏：凭据缺失 fail-closed，既有测试零回归 | 🟢 2026/10/17 提前交付（eaad6ebd；llm-harness 43/43 + 既有 26/31 零回归，8 preset 编译 8/8） |
-| M2 模块工具转绿 | W5 2026/11/20 | cve.processor/builder/exploiter/verifier 四模块工具（薄工具跑在 CLH 上）、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7/3.14.4） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🟢 2026/10/17 提前交付（90fcf6df；39 新测试 + 既有 26/31 零回归，domain-packs 12/12） |
-| M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | 2026/10/17（提前） | R-1 final 前置护栏（registry gate 进 reviews + 0-claims 评 degraded + 排查指引）；R-2 深度门槛（第五评审维 + 字数/段落软门槛）；R-3 provenance（digest/re-run command/回写）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：final 仅在检查通过时可达 | 🟢 2026/10/17 提前交付（6d22d71d；35/35 Python + 6 新守卫测试 + 既有 26/31/14 零回归） |
-| M-D5 CLH 硬化 | W1 2026/10/18 | api 后端流式（SSE）、429/瞬态有界退避、per-preset timeoutMs（preset > env 兜底）、步失败错误值贯通；CVE-2024-4340 对比跑重跑过 build-knowledge（PRD 3.14 V2.5.0） | 北极星：LLM 调用在真实网关下可依赖；护栏：既有 43/43 CLH 测试零回归 | 🟢 2026/10/17 提前交付（重跑全流程 6 步全绿：verified=true + flag，流式/退避/错误值贯通实战验证） |
-| M-D6 定价贯通 | W1 2026/10/18 | 内置官价目录（family → per-MTok input/cached/output，source+as-of）、env > 目录 > 无、预算声明 + 定价不可解析 → `CLH_PRICING_UNRESOLVED`、缓存读计入口径（PRD 3.14.8） | 北极星：预算帽真实生效（CVE 重跑可见 costUsd 累计）；护栏：无预算声明时行为不变 | 🟢 2026/10/18 提前交付（live 跑 succeeded + verified=true，costUsd ≈$1.11 累计、cached 556K/857K/661K 按目录价；70/70 CLH + 41 cve 零回归） |
-| M-D7 run 级 maxRuns | W2 2026/10/19 | flow 级 `maxRuns <n>` 文法 + parser/validator + host run 重试循环（每轮全新 attempt 记录）、`run-retries-exhausted`、合成测试（PRD 3.10.9） | 北极星：run 级失败恢复可测；护栏：默认 1 行为不变 | 🔵 |
-| M-D4 pack 自含 | 2026/10/17（提前） | cve 四工具移入 pack 本地 `tools/`、解析 pack 本地优先全局兜底、安装物含 `tools/`+`harness/`、移除 pack 一并移除本地工具（PRD 3.11.8） | 北极星：复现不再膨胀全局 `tools/`；护栏：autoresearch 既有 pack 安装/运行不回归 | 🟢 2026/10/17 提前交付（c931ac89；39+4 新测试 + 既有 26/31/14 零回归，autoresearch 零触碰） |
-
----
-
-## 5. 依赖关系与关键路径
-
-| 泳道 | 链路 |
-|------|------|
-| 引擎 | 切片 1 步级策略（已交付）→ 切片 D DSL v2（已交付）→ 切片 D3 CLH（已交付）→ 切片 2b 幂等键（已交付） |
-| 工具 | 切片 2 四模块薄工具+注册（已交付，跑在 CLH 上）→ 切片 D4 pack 自含（已交付）→ 切片 3 隔离执行（可选，下窗口） |
-
-关键路径：剩余 **切片 R（护栏）**——全部引擎/工具切片已提前交付；
-R 是本周期最后一条 P0 链。单人维护即瓶颈：任何插队需求必须等量
-砍掉同级切片。
+| Milestone | Date | Deliverables | Success metrics | Status |
+|-----------|------|--------------|-----------------|--------|
+| M1 LLM steps dependable | 2026/10/16 (early) | Step policy engine (maxAttempts/timeoutMs/budgetUsd), per-attempt receipts and timeline attempt grouping, synthetic fixture tests, full regression passing | North star: rescue rate measurable with a baseline; guardrail: existing 15 workflow-control tests no regression | 🟢 Delivered (9d8c9035); 22/22 tests (7 new step-policy + 15 existing zero regression), rescue rate measurable |
+| M-D DSL v2 structured orchestration | W3 2026/11/06 | Six constructs (sequence/parallel/choice/forEach/while/subflow), topological interpreter, DAG validation, step policy per branch, timeline/graph rendering, v1 linear compatibility | North star: orchestration no longer forced into tools; guardrail: v1 linear pack install/run no regression | 🟢 Delivered early 2026/10/16 (1a9e4cac engine 22/22 + aa69f4c9 trial pack rewrite; surfaces 45/45) |
+| M-D2 budget hierarchy | W3 2026/11/06 | Run-level budget cap (cross-step/branch accrual stop-loss) + `.ord` step-level maxAttempts syntax wired into step policy | North star: run-level stop-loss measurable; guardrail: behavior unchanged without a run cap configured | 🟢 Delivered early 2026/10/16 (179d43d2; workflow 26/26 + apps 31/31) |
+| M-D3 CLH infrastructure | W3 2026/11/06 | `packages/llm-harness` (preset schema + compiler + wrapper + api backend + dispatcher seam), 8 presets (CVE-Genie mapping, prompts Apache-2.0 with attribution), synthetic fixture tests | North star: module tools with zero hand-written LLM calling logic; guardrail: missing credentials fail closed, existing tests zero regression | 🟢 Delivered early 2026/10/17 (eaad6ebd; llm-harness 43/43 + existing 26/31 zero regression, 8 presets compile 8/8) |
+| M2 module tools turn green | W5 2026/11/20 | cve.processor/builder/exploiter/verifier four module tools (thin tools on CLH), tool-inventory.json registration, API idempotency key, test:domain-packs passing; tools never re-implement platform cross-cutting capabilities (PRD 3.11.7/3.14.4) | North star: pack list shows CveGenieTrial with no warnings; guardrail: missing any tool keeps the pack non-executable (fail-closed) | 🟢 Delivered early 2026/10/17 (90fcf6df; 39 new tests + existing 26/31 zero regression, domain-packs 12/12) |
+| M-R report depth and guardrails (inserted, occupies slice 3's buffer slot) | 2026/10/17 (early) | R-1 final precondition guardrail (registry gate in reviews + 0-claims reviewed degraded + troubleshooting guidance); R-2 depth gate (fifth review dimension + word/paragraph soft floors); R-3 provenance (digest/re-run command/write-back) — definitions in PRD 3.12 | North star: empty registry no longer passes hollow; guardrail: final reachable only when checks pass | 🟢 Delivered early 2026/10/17 (6d22d71d; 35/35 Python + 6 new guard tests + existing 26/31/14 zero regression) |
+| M-D5 CLH hardening | W1 2026/10/18 | api backend streaming (SSE), 429/transient bounded backoff, per-preset timeoutMs (preset > env fallback), step-failure error-value threading; the CVE-2024-4340 comparison-run rerun passes build-knowledge (PRD 3.14 V2.5.0) | North star: LLM calls dependable under a real gateway; guardrail: existing 43/43 CLH tests zero regression | 🟢 Delivered early 2026/10/17 (rerun full flow all 6 steps green: verified=true + flag, streaming/backoff/error-value threading battle-tested) |
+| M-D6 pricing threaded through | W1 2026/10/18 | Built-in official price catalog (family → per-MTok input/cached/output, source+as-of), env > catalog > none, declared budget + unresolvable pricing → `CLH_PRICING_UNRESOLVED`, cached-read billing (PRD 3.14.8) | North star: budget cap truly effective (the CVE rerun shows costUsd accruing); guardrail: behavior unchanged without a budget declaration | 🟢 Delivered early 2026/10/18 (live run succeeded + verified=true, costUsd ≈$1.11 accrued, cached 556K/857K/661K at catalog prices; 70/70 CLH + 41 cve zero regression) |
+| M-D7 run-level maxRuns | W2 2026/10/19 | Flow-level `maxRuns <n>` grammar + parser/validator + host run retry loop (a fresh attempt record each round), `run-retries-exhausted`, synthetic tests (PRD 3.10.9) | North star: run-level failure recovery measurable; guardrail: default 1 behavior unchanged | 🔵 |
+| M-D4 pack self-containment | 2026/10/17 (early) | The four cve tools move into pack-local `tools/`, pack-local-first resolution with global fallback, the install contains `tools/` + `harness/`, removing the pack removes local tools (PRD 3.11.8) | North star: reproduction no longer bloats global `tools/`; guardrail: existing autoresearch pack install/run no regression | 🟢 Delivered early 2026/10/17 (c931ac89; 39+4 new tests + existing 26/31/14 zero regression, autoresearch untouched) |
 
 ---
 
-## 6. 产能分配
+## 5. Dependencies and critical path
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| 团队人数 | 1 | 单人维护者（全栈） |
-| 迭代周期 | 2 周 | 3 个迭代 |
-| 有效工作日 | 8 天/迭代 | 扣除杂务 |
-| 产能系数 | 0.7 | 上下文切换/回归修复/技术债 |
-| 迭代产能 | ≈ 5.6 人天 | 1 × 8 × 0.7 |
-| 6 周总产能 | ≈ 17 人天 | 5.6 × 3 |
-| 已交付（切片 1/D/D2/D3/2b/2/D4，均提前） | 实际消耗 ≈ 8 人天 | 远低于估算上沿 |
-| 剩余分配（切片 R：R-1/R-2/R-3） | ≈ 3.5 人天 | 对剩余产能富余 |
-| 可选项（切片 3 隔离执行，下窗口） | 3~5 人天 | 移出本周期 |
+| Swimlane | Chain |
+|----------|-------|
+| Engine | Slice 1 step policy (delivered) → Slice D DSL v2 (delivered) → Slice D3 CLH (delivered) → Slice 2b idempotency key (delivered) |
+| Tools | Slice 2 four thin module tools + registration (delivered, on CLH) → Slice D4 pack self-containment (delivered) → Slice 3 isolated execution (optional, next window) |
 
-> 产能状态：全部引擎/工具切片提前交付，实际消耗远低于估算——
-> 剩余 R（≈3.5 人天）对剩余产能富余。止损规则已解除（D3 收尾于
-> 10/17）。降级预案保留：CLH seam 注入机制超估 → dispatcher
-> adapter 降级为 sandbox-policy 限制，seam 另立任务。
+Critical path: the remaining **slice R (guardrails)** — all engine/tool
+slices were delivered early; R is this cycle's last P0 chain. Solo
+maintenance is the bottleneck: any inserted requirement must cut an
+equal amount of a same-tier slice.
 
 ---
 
-## 7. 风险矩阵
+## 6. Capacity allocation
 
-| 风险 | 概率 | 影响 | 等级 | 缓解措施 | 预案 B | 负责人 |
-|------|------|------|------|---------|--------|--------|
-| 步级策略触碰引擎核心，既有 workflow 测试回归 | 中 | 高 | 🔴 高 | 默认 maxAttempts=1 保持现行为；策略在 dispatcher 调用点包一层，不进 interpreter；每步跑全量回归 test:full-minus-infra | 策略只挂 host 驱动，Vault 运行暂不启用 | Qiang Liu |
-| DSL v2 引擎复杂度（拓扑执行/join/分支步级策略）超估 | 中 | 高 | 🔴 高 | v1 线性兼容是护栏（不回归即可收）；先交 parallel/choice/forEach，subflow 可降级 | subflow/while 移下一窗口，本周期保 parallel/choice/forEach | Qiang Liu |
-| 插入切片 D 后总需求（≈16.5~21.5 人天）贴满 6 周产能（≈17） | 高 | 中 | 🔴 高 | M1 提前交付回填约 3 人天；R-2/R-3 划为可顺延缓冲；W4 末止损规则 | M2 顺延下窗口，本周期保 D + R-1 | Qiang Liu |
-| 单人带宽被杂务/回归修复挤占，里程碑滑动 | 高 | 中 | 🔴 高 | 20% 产能缓冲；切片 3 划为功能缓冲可砍；P0 插队需等量砍同级 | 推迟切片 3，M3 移出本周期 | Qiang Liu |
-| 四模块工具的 LLM 依赖（codex bin/凭据）本地不可用 | 中 | 中 | 🟡 中 | fail-closed 语义明确（非零退出注明 provider 不可用）；测试用 stub 二进制合成 fixture | 先交付协议与注册，LLM 接线单独切片 | Qiang Liu |
-| dsh 开发者预览有破坏性变更承诺；seam 注入机制（自定义插件）不可行 | 中 | 中 | 🟡 中 | CLH compiler 层隔离（preset 不动，换后端重编译）；dsh 版本钉死；schema 校验对齐 dump-config-schema | 换 opencode/codex 后端；seam 降级为 sandbox-policy 限制另立任务 | Qiang Liu |
-| host 模式沙箱隔离强度有限（目录级，非容器级） | 低 | 中 | 🟢 低 | 污染断言明确定义并测试；路径禁闭 + 环境 scrub + timeout 三重边界 | 启用 docker 后端 | Qiang Liu |
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Team size | 1 | Solo maintainer (full stack) |
+| Iteration length | 2 weeks | 3 iterations |
+| Effective workdays | 8 days/iteration | Chores deducted |
+| Capacity factor | 0.7 | Context switching / regression fixes / tech debt |
+| Iteration capacity | ≈ 5.6 person-days | 1 × 8 × 0.7 |
+| 6-week total capacity | ≈ 17 person-days | 5.6 × 3 |
+| Delivered (slices 1/D/D2/D3/2b/2/D4, all early) | Actual consumption ≈ 8 person-days | Well under the estimate ceiling |
+| Remaining allocation (slice R: R-1/R-2/R-3) | ≈ 3.5 person-days | Comfortable against remaining capacity |
+| Optional (slice 3 isolated execution, next window) | 3~5 person-days | Moved out of this cycle |
+
+> Capacity status: all engine/tool slices were delivered early with
+> actual consumption well below estimates — the remaining R (≈3.5
+> person-days) is comfortable against remaining capacity. The stop-loss
+> rule is lifted (D3 closed on 10/17). The downgrade fallback plan
+> stays: if the CLH seam injection mechanism is over-estimated → the
+> dispatcher adapter degrades to sandbox-policy limits and the seam
+> becomes a separate task.
 
 ---
 
-## 8. 缓冲策略
+## 7. Risk matrix
 
-| 缓冲类型 | 占比 | 人天 | 用途 |
-|----------|------|------|------|
-| 风险应对 | 10% | 1.7 | 引擎回归修复、切片 R 调试 |
-| 突发需求 | 10% | 1.7 | 应急插队（等量砍同级） |
-| 弹性需求（切片 R-2/R-3） | 20% | 2 | 引擎/工具切片已提前交付，止损规则解除；切片 3 已移出 |
+| Risk | Probability | Impact | Level | Mitigation | Fallback plan | Owner |
+|------|-------------|--------|-------|------------|---------------|-------|
+| Step policy touches the engine core; existing workflow tests regress | Medium | High | 🔴 High | Default maxAttempts=1 keeps current behavior; the policy wraps the dispatcher call site, never the interpreter; full regression test:full-minus-infra per step | Policy attaches to the host driver only; Vault runs not enabled for now | Qiang Liu |
+| DSL v2 engine complexity (topological execution/join/branch step policy) over-estimated | Medium | High | 🔴 High | v1 linear compatibility is the guardrail (no regression is enough to land); deliver parallel/choice/forEach first, subflow can degrade | subflow/while move to the next window; this cycle keeps parallel/choice/forEach | Qiang Liu |
+| After inserting slice D, total demand (≈16.5~21.5 person-days) fills the 6-week capacity (≈17) | High | Medium | 🔴 High | M1 delivered early backfills ~3 person-days; R-2/R-3 marked as deferrable buffer; stop-loss rule at end of W4 | M2 shifts to the next window; this cycle keeps D + R-1 | Qiang Liu |
+| Solo bandwidth squeezed by chores/regression fixes, milestones slip | High | Medium | 🔴 High | 20% capacity buffer; slice 3 marked as a cuttable feature buffer; P0 insertions must cut same-tier work equally | Defer slice 3, M3 moves out of this cycle | Qiang Liu |
+| The four module tools' LLM dependency (codex bin/credentials) unavailable locally | Medium | Medium | 🟡 Medium | fail-closed semantics explicit (non-zero exit noting provider unavailable); tests use stub binaries with synthetic fixtures | Deliver the protocol and registration first; LLM wiring gets its own slice | Qiang Liu |
+| dsh developer preview promises breaking changes; the seam injection mechanism (custom plugins) may not work | Medium | Medium | 🟡 Medium | CLH compiler layer isolation (preset untouched, recompile with a new backend); dsh version pinned; schema validation aligned with dump-config-schema | Switch to opencode/codex backends; the seam degrades to sandbox-policy limits as a separate task | Qiang Liu |
+| host-mode sandbox isolation strength limited (directory-level, not container-level) | Low | Medium | 🟢 Low | Pollution assertion explicitly defined and tested; path confinement + environment scrub + timeout triple boundary | Enable the docker backend | Qiang Liu |
+
+---
+
+## 8. Buffer strategy
+
+| Buffer type | Share | Person-days | Purpose |
+|-------------|-------|-------------|---------|
+| Risk response | 10% | 1.7 | Engine regression fixes, slice R debugging |
+| Ad-hoc requests | 10% | 1.7 | Emergency insertions (equal same-tier cut) |
+| Elastic demand (slices R-2/R-3) | 20% | 2 | Engine/tool slices delivered early, stop-loss rule lifted; slice 3 moved out |
 
