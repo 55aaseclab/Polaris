@@ -30,6 +30,7 @@ apps/polaris-web/dist/
 apps/polaris-web/test-results/
 packages/paseo/dist-build/
 packages/paseo/source/
+packages/paseo/.surface-*
 .paseo/
 .polaris/
 apps/polaris/.coverage/
