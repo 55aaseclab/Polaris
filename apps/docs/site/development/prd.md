@@ -347,7 +347,7 @@ flowchart LR
 | Artifacts | Release guardrails (final gate + depth gate + provenance) | P0 | Delivered (2026/10/17): R-1/R-2/R-3 guards + three-state publication, see 3.12 |
 | Definition | DSL v2 structured orchestration (parallel/choice/forEach/while/subflow) | P0 | Delivered (2026/10/16): engine + Portal rendering, see 3.13 |
 | Runs | Run-level budget cap + step-level/flow-level budget syntax | P0 | Delivered (2026/10/16): run cap + maxAttempts syntax + flow-level declaration, see 3.10.9 |
-| Runs | Run-level maxRuns (run retry count) | P1 | Flow-level `maxRuns <n>`, default 1 unchanged; paper baseline 5, see 3.10.9 |
+| Runs | Run-level maxRuns (run retry count) | P1 | Delivered (2026/10/19): flow-level `maxRuns <n>`, default 1 unchanged; paper baseline 5; a live eval round-1 setup failure was rescued by a whole-run rerun, see 3.10.9 |
 | Infrastructure | LLM invocation runtime (CLH: preset schema + compiler + wrapper + dispatcher seam) | P0 | Delivered (2026/10/17): dsh-first backend; api/bounded/open kinds; 8 presets, see 3.14 |
 
 ---

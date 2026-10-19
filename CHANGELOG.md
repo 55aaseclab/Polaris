@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file. Versions are
 ordered newest first.
 
+## [Unreleased]
+
+### Added
+
+- Run-level maxRuns (PRD 3.10.9): flow-level `maxRuns <n>` in the
+  `.ord` grammar with a host run-retry loop — each round a full rerun
+  (no step skipping), the budget accruing across rounds, exhaustion
+  mapped to the stable code `run-retries-exhausted`; default 1 keeps
+  behavior unchanged. Proven in production during the evaluation
+  calibration (a round-1 setup failure rescued by a whole-run rerun).
+- CVE-Genie comparison and calibration report
+  (`development/cve-genie-comparison`): the official-vs-Polaris
+  comparison, seven defects found and fixed during live runs, the
+  three-sample calibration (all timeout-capped — the 45-min paper-parity
+  cap is the dominant constraint at Qwen pacing), and the open tuning
+  decision.
+
 ## [0.5.0] - 2026-10-18
 
 ### Added
