@@ -7,6 +7,16 @@ ordered newest first.
 
 ### Added
 
+- CLH hardening from live CVE runs (PRD 3.14 V2.5.0/V2.6.0): streaming
+  api backend (SSE with usage readback), call-level bounded backoff on
+  429/transient failures, per-preset timeoutMs (preset > env > default)
+  honored by both backends, cached-token billing end to end with a
+  built-in official price catalog (sourced, as-of dated; env override >
+  catalog), the pricing gate failing runs before any step when a
+  declared budget cannot accrue (`CLH_PRICING_UNRESOLVED`), step-failure
+  error values threaded into the run record, and lenient JSON extraction
+  for the precise-json output contract. Live-verified: full CVE-2024-4340
+  flow succeeded with verified=true and ~$1.11 accrued against the $5 cap.
 - Report release guardrails (PRD 3.12): final pre-condition gate
   (non-empty evidence registry + minimum body length, deterministic
   registry gate in the reviews document, stable degraded reason codes

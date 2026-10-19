@@ -70,7 +70,7 @@ Backbone（用户旅程："一个工作流领域从想法到长期运行"）：
 | D4 pack 自含（PRD 3.11.8） | 声明/接入/执行（分发面） | cve 四工具移入 pack 本地 `tools/`；解析 pack 本地优先全局兜底；安装物含 tools/+harness/；移除 pack 一并移除本地工具；autoresearch 不回归 | 1~2 人天 | 已完成（2026/10/17 提前交付，c931ac89） |
 | R 报告深度与护栏（PRD 3.12） | 分析/报告/评审 | 空 registry 不再空洞通过；终稿篇幅可辨识；provenance 可复现 | ≈ 3.5 人天 | 已完成（2026/10/17 提前交付，6d22d71d） |
 | D5 CLH 硬化（PRD 3.14 V2.5.0） | 接入/执行/追溯 | api 后端流式（分钟级长生成完整产出）；429/瞬态退避有界重试；per-preset timeoutMs 进 preset 且 env 兜底；步失败错误值进 run 记录；重跑 CVE-2024-4340 全流程过 build-knowledge | 1~2 人天 | 已完成（2026/10/17 提前交付；重跑 6 步全绿，verified=true + flag） |
-| D6 定价目录与预算 fail-closed（PRD 3.14.8） | 接入/执行/追溯 | 内置官价目录（family → per-MTok，source+as-of）；env > 目录 > 无；预算声明 + 定价不可解析 → run 启动前 `CLH_PRICING_UNRESOLVED`；缓存读计入口径；重跑验证预算帽真实累计 | ~1 人天 | 未开始（二次对比跑实证预算静默失效） |
+| D6 定价目录与预算 fail-closed（PRD 3.14.8） | 接入/执行/追溯 | 内置官价目录（family → per-MTok，source+as-of）；env > 目录 > 无；预算声明 + 定价不可解析 → run 启动前 `CLH_PRICING_UNRESOLVED`；缓存读计入口径；重跑验证预算帽真实累计 | ~1 人天 | 已完成（2026/10/18 提前交付；live 跑 costUsd ≈$1.11 累计 + verified=true） |
 | 3 隔离执行（PRD 3.8/3.9，可选） | 接入/执行/恢复 | 污染断言通过；干净重试可测 | 3~5 人天 | 移出本周期 |
 | 4 丰满层（远期） | live UX/性能基线 | — | — | 远期 |
 
@@ -103,7 +103,7 @@ gantt
     section 报告
     切片 R 报告深度与护栏 :done, r1, 2026-10-17, 1d
     切片 D5 CLH 硬化（流式 + 退避 + per-preset timeout） :done, c1, 2026-10-17, 1d
-    切片 D6 定价目录与预算 fail-closed :c2, 2026-10-18, 1d
+    切片 D6 定价目录与预算 fail-closed :done, c2, 2026-10-18, 1d
     section 里程碑
     M1 LLM 步骤可依赖 :milestone, m1, 2026-10-16, 0d
     M-D DSL v2 结构化编排 :milestone, md, 2026-10-16, 0d
@@ -139,7 +139,7 @@ gantt
 | M2 模块工具转绿 | W5 2026/11/20 | cve.processor/builder/exploiter/verifier 四模块工具（薄工具跑在 CLH 上）、tool-inventory.json 注册、API 幂等键、test:domain-packs 通过；工具不重复实现平台横切能力（PRD 3.11.7/3.14.4） | 北极星：pack list 显示 CveGenieTrial 无 warnings；护栏：缺失任一工具时 pack 保持不可执行（fail-closed） | 🟢 2026/10/17 提前交付（90fcf6df；39 新测试 + 既有 26/31 零回归，domain-packs 12/12） |
 | M-R 报告深度与护栏（插入，占用切片 3 缓冲位） | 2026/10/17（提前） | R-1 final 前置护栏（registry gate 进 reviews + 0-claims 评 degraded + 排查指引）；R-2 深度门槛（第五评审维 + 字数/段落软门槛）；R-3 provenance（digest/re-run command/回写）——口径见 PRD 3.12 | 北极星：空 registry 不再空洞通过；护栏：final 仅在检查通过时可达 | 🟢 2026/10/17 提前交付（6d22d71d；35/35 Python + 6 新守卫测试 + 既有 26/31/14 零回归） |
 | M-D5 CLH 硬化 | W1 2026/10/18 | api 后端流式（SSE）、429/瞬态有界退避、per-preset timeoutMs（preset > env 兜底）、步失败错误值贯通；CVE-2024-4340 对比跑重跑过 build-knowledge（PRD 3.14 V2.5.0） | 北极星：LLM 调用在真实网关下可依赖；护栏：既有 43/43 CLH 测试零回归 | 🟢 2026/10/17 提前交付（重跑全流程 6 步全绿：verified=true + flag，流式/退避/错误值贯通实战验证） |
-| M-D6 定价贯通 | W1 2026/10/18 | 内置官价目录（family → per-MTok input/cached/output，source+as-of）、env > 目录 > 无、预算声明 + 定价不可解析 → `CLH_PRICING_UNRESOLVED`、缓存读计入口径（PRD 3.14.8） | 北极星：预算帽真实生效（CVE 重跑可见 costUsd 累计）；护栏：无预算声明时行为不变 | 🔵 |
+| M-D6 定价贯通 | W1 2026/10/18 | 内置官价目录（family → per-MTok input/cached/output，source+as-of）、env > 目录 > 无、预算声明 + 定价不可解析 → `CLH_PRICING_UNRESOLVED`、缓存读计入口径（PRD 3.14.8） | 北极星：预算帽真实生效（CVE 重跑可见 costUsd 累计）；护栏：无预算声明时行为不变 | 🟢 2026/10/18 提前交付（live 跑 succeeded + verified=true，costUsd ≈$1.11 累计、cached 556K/857K/661K 按目录价；70/70 CLH + 41 cve 零回归） |
 | M-D4 pack 自含 | 2026/10/17（提前） | cve 四工具移入 pack 本地 `tools/`、解析 pack 本地优先全局兜底、安装物含 `tools/`+`harness/`、移除 pack 一并移除本地工具（PRD 3.11.8） | 北极星：复现不再膨胀全局 `tools/`；护栏：autoresearch 既有 pack 安装/运行不回归 | 🟢 2026/10/17 提前交付（c931ac89；39+4 新测试 + 既有 26/31/14 零回归，autoresearch 零触碰） |
 
 ---

@@ -1167,8 +1167,8 @@ capability leases、run 事件（见 workflow.md）。运行/回执/产物/审�
 | 预算层级 | run 级预算超帽即止损整个运行（跨 parallel 分支累计可测）；`.ord` 步级 `maxAttempts <n>` 与 flow 级 `budgetUsd`/`timeoutMs` 被 parser 接受，flow 声明 > env 兜底 | P0 |
 | maxRuns | run 失败后自动重跑（全新环境，3.8 生效时），最多 n 次；默认 1 行为不变；超限错误码 `run-retries-exhausted` | P1 |
 | CLH | 非法 preset 被拒绝；compiler 产物对后端 schema 校验通过；wrapper 解析会话日志产出回执（costUsd/tokens）；api 后端单 call 含计费回读；凭据缺失 fail-closed | P0 |
-| CLH 硬化 | api 后端流式（分钟级长生成不被网关掐断）；429/瞬态退避有界重试（call 级，attempt 内）；per-preset `timeoutMs` 被接受且 env 兜底；步失败错误值进 run 记录 | P0 |
-| 定价贯通 | 预算声明 + 定价不可解析 → run 启动前 fail-closed（`CLH_PRICING_UNRESOLVED`）；内置目录命中的模型在无 env 时 costUsd 可解析且含缓存读口径 | P0 |
+| CLH 硬化 | api 后端流式（分钟级长生成不被网关掐断）；429/瞬态退避有界重试（call 级，attempt 内）；per-preset `timeoutMs` 被接受且 env 兜底；步失败错误值进 run 记录 | P0 | 已交付（2026/10/18）：live 跑 6 步全绿实证 |
+| 定价贯通 | 预算声明 + 定价不可解析 → run 启动前 fail-closed（`CLH_PRICING_UNRESOLVED`）；内置目录命中的模型在无 env 时 costUsd 可解析且含缓存读口径 | P0 | 已交付（2026/10/18）：live 跑 costUsd ≈$1.11 真实累计（cached 556K/857K/661K 按目录价） |
 | pack 自含 | pack 本地工具解析优先于全局 `tools/`；安装物含 `tools/` 与 `harness/`；移除 pack 一并移除其本地工具；autoresearch 既有 pack 安装/运行不回归 | P0 |
 
 ---
