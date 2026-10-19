@@ -172,3 +172,21 @@ test("api kind warns that loopCap is ignored", () => {
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0] ?? "", /loopCap is ignored/u);
 });
+
+test("schema accepts an optional positive-integer timeoutMs", () => {
+  const without = validatePreset({ ...validBase });
+  assert.equal(without.preset.timeoutMs, undefined);
+  const withTimeout = validatePreset({ ...validBase, timeoutMs: 600000 });
+  assert.equal(withTimeout.preset.timeoutMs, 600000);
+  assert.equal(withTimeout.warnings.length, 0);
+});
+
+test("schema rejects illegal timeoutMs values with a stable code", () => {
+  for (const value of [0, -5, 1.5, "600000", null, true]) {
+    const error = expectCode(
+      () => validatePreset({ ...validBase, timeoutMs: value }),
+      "CLH_PRESET_INVALID",
+    );
+    assert.equal(error.details["field"], "timeoutMs");
+  }
+});

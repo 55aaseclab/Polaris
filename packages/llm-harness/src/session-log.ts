@@ -23,6 +23,10 @@ export interface SessionTokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** PRD 3.14.8: cache-read tokens (a separate bucket; total = in + out + cached). */
+  cachedTokens: number;
+  /** Where cachedTokens came from: a usage detail field or total-in-out inference. */
+  cachedTokensSource?: "usage-details" | "inferred";
 }
 
 export interface SessionLogSummary {
@@ -105,7 +109,12 @@ export function parseJsonl(content: string): SessionEventRecord[] {
  */
 export function summarizeSessionLog(sessionPath: string, events: SessionEventRecord[]): SessionLogSummary {
   const toolCalls: SessionToolCall[] = [];
-  const tokens: SessionTokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const tokens: SessionTokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    cachedTokens: 0,
+  };
   let turnCount = 0;
   let lastAssistantText: string | undefined;
   let cwd: string | undefined;
@@ -135,6 +144,13 @@ export function summarizeSessionLog(sessionPath: string, events: SessionEventRec
         tokens.inputTokens += usage.inputTokens;
         tokens.outputTokens += usage.outputTokens;
         tokens.totalTokens += usage.totalTokens;
+        tokens.cachedTokens += usage.cachedTokens;
+        // A disclosed detail wins over inference for the aggregate annotation.
+        if (usage.cachedTokensSource === "usage-details") {
+          tokens.cachedTokensSource = "usage-details";
+        } else if (tokens.cachedTokensSource === undefined) {
+          tokens.cachedTokensSource = "inferred";
+        }
       }
       const text = readTextBlocks(data["message"]);
       if (text !== undefined) lastAssistantText = text;
@@ -165,13 +181,47 @@ function readUsage(value: unknown): SessionTokenUsage | undefined {
   const record = value as Record<string, unknown>;
   const inputTokens = record["inputTokens"];
   const outputTokens = record["outputTokens"];
-  const totalTokens = record["totalTokens"];
   if (typeof inputTokens !== "number" || typeof outputTokens !== "number") return undefined;
+  const totalTokens = typeof record["totalTokens"] === "number"
+    ? record["totalTokens"]
+    : inputTokens + outputTokens;
+  const detailed = readDetailedCachedTokens(record);
+  if (detailed !== undefined) {
+    return {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      cachedTokens: detailed,
+      cachedTokensSource: "usage-details",
+    };
+  }
+  // No detail field: dsh bills cached reads as a separate bucket, so whatever
+  // total discloses beyond input + output is the cache-read split (inferred).
   return {
     inputTokens,
     outputTokens,
-    totalTokens: typeof totalTokens === "number" ? totalTokens : inputTokens + outputTokens,
+    totalTokens,
+    cachedTokens: Math.max(0, totalTokens - inputTokens - outputTokens),
+    cachedTokensSource: "inferred",
   };
+}
+
+/** Usage detail fields first: dsh cachedTokens / cacheReadTokens, then an
+ * OpenAI-style prompt_tokens_details.cached_tokens passthrough. */
+function readDetailedCachedTokens(record: Record<string, unknown>): number | undefined {
+  for (const key of ["cachedTokens", "cacheReadTokens"] as const) {
+    const direct = record[key];
+    if (typeof direct === "number" && Number.isFinite(direct) && direct >= 0) {
+      return Math.floor(direct);
+    }
+  }
+  const details = record["prompt_tokens_details"];
+  if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
+  const cached = (details as Record<string, unknown>)["cached_tokens"];
+  if (typeof cached === "number" && Number.isFinite(cached) && cached >= 0) {
+    return Math.floor(cached);
+  }
+  return undefined;
 }
 
 function readTextBlocks(message: unknown): string | undefined {

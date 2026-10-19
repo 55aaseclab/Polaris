@@ -675,6 +675,7 @@ function rowToWorkflowRun(
     output: parseRecord(row.output_json),
     errorCode: asOptionalString(row.error_code),
     errorMessage: asOptionalString(row.error_message),
+    errorValues: parseErrorValues(row.error_values_json),
     workerOwner: asOptionalString(row.worker_owner),
     workerExpiresAt: row.worker_expires_at == null ? undefined : Number(row.worker_expires_at),
     createdAt: String(row.created_at),

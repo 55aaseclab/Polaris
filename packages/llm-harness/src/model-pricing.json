@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "billingSemantics": {
+    "currency": "USD",
+    "api": "OpenAI usage semantics: prompt_tokens includes cached_tokens (usage.prompt_tokens_details.cached_tokens). costUsd = (inputTokens - cachedTokens) * inputPerMTok + cachedTokens * cachedInputPerMTok + outputTokens * outputPerMTok.",
+    "dsh": "dsh session-log usage semantics: totalTokens = inputTokens + outputTokens + cachedTokens (cached is a separate bucket, never part of inputTokens). costUsd = inputTokens * inputPerMTok + cachedTokens * cachedInputPerMTok + outputTokens * outputPerMTok.",
+    "envOverride": "POLARIS_CLH_<TIER>_PRICE_CACHED_PER_MTOK overrides the catalog cached rate; when an env override sets only input/output prices, cached reads bill at the input rate (conservative over-estimate, never under-bills).",
+    "resolution": "Pricing resolution (PRD 3.14.8): env override > catalog entry (longest prefix match, case-sensitive) > unresolvable. An unresolvable model makes a budget-declaring run fail closed with CLH_PRICING_UNRESOLVED before the first step; without a declared budget costUsd stays honestly undefined."
+  },
+  "entries": [
+    {
+      "prefix": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "inputPerMTok": 0.3,
+      "cachedInputPerMTok": 0.006,
+      "outputPerMTok": 1.2,
+      "currency": "USD",
+      "sourceUrl": "https://api-docs.deepseek.com/quick_start/pricing",
+      "asOf": "2026-10-18",
+      "note": "Peak rates (conservative). Off-peak is half: cache-hit $0.003, cache-miss $0.15, output $0.6 per MTok. Peak hours 01:00-04:00 and 06:00-10:00 UTC Monday-Friday. Model version DeepSeek-V4.1-Flash-1017, API name deepseek-flash."
+    },
+    {
+      "prefix": "zai-org/GLM-5.3-FlashX",
+      "inputPerMTok": 0.37,
+      "cachedInputPerMTok": 0.075,
+      "outputPerMTok": 1.25,
+      "currency": "USD",
+      "sourceUrl": "https://docs.z.ai/guides/overview/pricing",
+      "asOf": "2026-10-18",
+      "note": "Listed separately from GLM-5.3-Flash so the Flash prefix cannot misprice FlashX (longest prefix match)."
+    },
+    {
+      "prefix": "zai-org/GLM-5.3-Flash",
+      "inputPerMTok": 0.15,
+      "cachedInputPerMTok": 0.03,
+      "outputPerMTok": 0.5,
+      "currency": "USD",
+      "sourceUrl": "https://docs.z.ai/guides/overview/pricing",
+      "asOf": "2026-10-18",
+      "note": "Cached input storage is limited-time free and not billed."
+    },
+    {
+      "prefix": "Qwen/Qwen3.5-397B-A17B",
+      "inputPerMTok": 0.6,
+      "cachedInputPerMTok": 0.6,
+      "outputPerMTok": 3.6,
+      "currency": "USD",
+      "sourceUrl": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+      "asOf": "2026-10-18",
+      "note": "Singapore international standard price, 0 < tokens <= 256K tier. The model is not in the Model Studio context-cache program, so cached reads bill at the standard input price."
+    }
+  ]
+}

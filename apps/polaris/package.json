@@ -33,6 +33,7 @@
     "test:coverage": "sh -lc 'set -a; [ -f ../../.env.dev ] && . ../../.env.dev || true; set +a; unset POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY_SCRIPT POLARIS_DEFAULT_CODEX_RIGHTCODE_API_KEY; pnpm run build:auth && NODE_ENV=test node scripts/test-coverage.mjs'"
   },
   "dependencies": {
+    "@polaris/llm-harness": "workspace:*",
     "@polaris/polaris-auth-server": "workspace:*",
     "@polaris/polaris-shell": "workspace:*",
     "@polaris/vault-runtime": "workspace:*",

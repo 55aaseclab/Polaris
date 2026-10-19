@@ -12,6 +12,9 @@ export interface HarnessPreset {
   loopCap: number;
   outputContract: OutputContract;
   permission: PresetPermission;
+  /** Per-preset call timeout (PRD 3.14.2): api = per call, dsh = whole session.
+   * Falls back to POLARIS_CLH_TIMEOUT_MS, then the built-in default. */
+  timeoutMs?: number;
   prompts?: PromptSpec;
 }
 
@@ -43,6 +46,7 @@ const KNOWN_FIELDS = new Set([
   "loopCap",
   "outputContract",
   "permission",
+  "timeoutMs",
   "prompts",
 ]);
 
@@ -83,6 +87,7 @@ export function validatePreset(input: unknown): ParsedPreset {
   const outputContract = checkEnum(record.outputContract, OUTPUT_CONTRACTS, "outputContract");
   const permission = checkEnum(record.permission, PERMISSIONS, "permission");
   const loopCap = checkLoopCap(record.loopCap);
+  const timeoutMs = checkTimeoutMs(record.timeoutMs);
 
   for (const field of ["id", "title", "description"] as const) {
     const value = record[field];
@@ -106,6 +111,7 @@ export function validatePreset(input: unknown): ParsedPreset {
   for (const field of ["id", "title", "description"] as const) {
     if (record[field] !== undefined) preset[field] = record[field] as string;
   }
+  if (timeoutMs !== undefined) preset.timeoutMs = timeoutMs;
   if (prompts) preset.prompts = prompts;
 
   if (kind === "api" && loopCap !== 1) {
@@ -130,6 +136,17 @@ function checkLoopCap(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
     throw new ClhError("CLH_PRESET_INVALID", "Preset field loopCap must be an integer >= 1", {
       field: "loopCap",
+      value,
+    });
+  }
+  return value;
+}
+
+function checkTimeoutMs(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new ClhError("CLH_PRESET_INVALID", "Preset field timeoutMs must be an integer >= 1", {
+      field: "timeoutMs",
       value,
     });
   }

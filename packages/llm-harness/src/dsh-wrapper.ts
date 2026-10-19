@@ -9,6 +9,7 @@ import {
   findNewestSessionLog,
   readSessionLog,
   summarizeSessionLog,
+  type SessionTokenUsage,
 } from "./session-log.js";
 import type { HarnessPreset } from "./schema.js";
 
@@ -19,6 +20,7 @@ export interface DshRunOptions {
   env: ClhEnv;
   /** Sandbox workspace root and dsh child cwd. */
   workspaceRoot: string;
+  /** Overrides preset.timeoutMs and POLARIS_CLH_TIMEOUT_MS (PRD 3.14.2). */
   timeoutMs?: number;
   /** Keep the temp patch file instead of deleting it after the run. */
   keepPatch?: boolean;
@@ -28,7 +30,7 @@ export interface DshRunOptions {
 
 export interface DshReceipt {
   costUsd?: number;
-  tokens: { inputTokens: number; outputTokens: number; totalTokens: number };
+  tokens: SessionTokenUsage;
   toolCalls: number;
   exitCode: number | null;
   sessionLogPath?: string;
@@ -44,7 +46,9 @@ export interface DshReceipt {
  * Run one preset through the dsh headless backend: compile the patch overlay
  * (temp file, one-shot), spawn dsh, locate the durable session log, and parse
  * it into a receipt. Cost reads back from tier pricing; unset pricing yields
- * an honest undefined.
+ * an honest undefined. Cached reads are a separate usage bucket in the dsh
+ * session log (PRD 3.14.8), so billing uses the cached-separate semantics and
+ * the receipt tokens carry the cache-read split with its disclosure source.
  */
 export async function runDshPreset(options: DshRunOptions): Promise<DshReceipt> {
   const startedAt = Date.now();
@@ -57,7 +61,7 @@ export async function runDshPreset(options: DshRunOptions): Promise<DshReceipt> 
   try {
     if (options.dryRun) {
       return {
-        tokens: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        tokens: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
         toolCalls: 0,
         exitCode: 0,
         durationMs: Date.now() - startedAt,
@@ -68,7 +72,7 @@ export async function runDshPreset(options: DshRunOptions): Promise<DshReceipt> 
     }
     const { exitCode, sessionLogPath, sessionEvents } = await spawnDsh(options, compiled, patchPath);
     const receipt: DshReceipt = {
-      tokens: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      tokens: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 },
       toolCalls: 0,
       exitCode,
       durationMs: Date.now() - startedAt,
@@ -84,7 +88,7 @@ export async function runDshPreset(options: DshRunOptions): Promise<DshReceipt> 
       receipt.turnCount = summary.turnCount;
       receipt.finalText = summary.finalText;
       receipt.endedReason = summary.endedReason;
-      receipt.costUsd = computeCostUsd(summary.tokens, options.preset.model, options.env);
+      receipt.costUsd = computeCostUsd(summary.tokens, options.preset.model, options.env, "cached-separate");
       enforceOutputContract(options.preset.outputContract, receipt.finalText, receipt.toolCalls);
     }
     return receipt;
@@ -115,14 +119,14 @@ async function spawnDsh(options: DshRunOptions, compiled: CompiledDshRun, patchP
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const timeoutMs = options.timeoutMs;
+  // PRD 3.14.2 precedence: explicit option > preset.timeoutMs > env default.
+  const timeoutMs = options.timeoutMs ?? options.preset.timeoutMs ?? env.apiTimeoutMs;
   let timedOut = false;
-  const timer = timeoutMs
-    ? setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGTERM");
-      }, timeoutMs)
-    : undefined;
+  const startedAtMs = Date.now();
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+  }, timeoutMs);
 
   const { exitCode } = await new Promise<{ exitCode: number | null }>((resolve, reject) => {
     child.stdout!.on("data", (chunk) => {
@@ -148,6 +152,8 @@ async function spawnDsh(options: DshRunOptions, compiled: CompiledDshRun, patchP
   if (timedOut) {
     throw new ClhError("CLH_API_TIMEOUT", `dsh run exceeded timeoutMs=${timeoutMs}`, {
       timeoutMs,
+      elapsedMs: Date.now() - startedAtMs,
+      tier: options.preset.model,
       exitCode,
     });
   }

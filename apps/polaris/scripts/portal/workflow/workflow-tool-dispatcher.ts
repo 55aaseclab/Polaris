@@ -227,8 +227,9 @@ export class WorkflowToolDispatcher {
       return {
         ok: false,
         // A failed tool may still have billed work; salvage its costUsd so the
-        // step-level budget (PRD 3.10) accumulates across failed attempts.
-        output: partialCostUsd(outputPath),
+        // step-level budget (PRD 3.10) accumulates across failed attempts, and
+        // thread the stable error code/values (PRD 3.14) into the receipt.
+        output: partialFailureOutput(outputPath),
         resolvedVersion: port.version,
         error: error instanceof Error ? error.message : String(error),
       };
@@ -236,12 +237,28 @@ export class WorkflowToolDispatcher {
   }
 }
 
-/** Reads a partial tool output and keeps only a finite costUsd, if any. */
-function partialCostUsd(outputPath: string | undefined): StepContext {
+/**
+ * Reads a partial tool output after a failure: a finite costUsd plus the
+ * stable error code and structured values the tool reported (PRD 3.14),
+ * flattened into StepContext-safe primitives.
+ */
+function partialFailureOutput(outputPath: string | undefined): StepContext {
   if (!outputPath || !fs.existsSync(outputPath)) return {};
   try {
-    const value = readJson(outputPath).costUsd;
-    return typeof value === "number" && Number.isFinite(value) ? { costUsd: value } : {};
+    const value = readJson(outputPath);
+    const output: StepContext = {};
+    if (typeof value["costUsd"] === "number" && Number.isFinite(value["costUsd"])) {
+      output["costUsd"] = value["costUsd"];
+    }
+    const errorCode = value["errorCode"];
+    if (typeof errorCode === "string" && errorCode.trim()) {
+      output["errorCode"] = errorCode;
+    }
+    const errorValues = value["errorValues"];
+    if (isRecord(errorValues)) {
+      output["errorValuesJson"] = JSON.stringify(errorValues);
+    }
+    return output;
   } catch {
     return {};
   }

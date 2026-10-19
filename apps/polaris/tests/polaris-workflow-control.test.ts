@@ -129,6 +129,97 @@ flow ReadMetadata title "Read metadata" create {
 }
 `;
 
+const THREADING_PACK_SOURCE = `
+domain ThreadPack version "1.0.0"
+title "Synthetic threading pack"
+description "Synthetic host-mode tool failure threading fixture"
+
+port CveProcess version "1.0.0" {
+  in {
+    cveId: String
+    cveDescription: String?
+  }
+  out {
+    knowledgeRef: String
+    rootCauseRef: String
+    processorStatus: String
+  }
+  effect ffi
+  binding { tool "cve.processor" }
+}
+
+flow BuildKnowledge title "Build knowledge" create {
+  input {
+    cveId: String required
+    cveDescription: String required
+  }
+  steps {
+    build "Build knowledge" {
+      uses { cveId, cveDescription }
+      call CveProcess
+      command "build-knowledge"
+      output { knowledgeRef: String, rootCauseRef: String, processorStatus: String }
+    }
+  }
+  output {
+    knowledgeRef: String from knowledgeRef
+    rootCauseRef: String from rootCauseRef
+    processorStatus: String from processorStatus
+  }
+  ui { layout form primary "Build" }
+}
+`;
+
+const PRICING_PACK_SOURCE = (flowHeader: string) => `
+domain PricingPack version "1.0.0"
+title "Synthetic pricing pack"
+description "Synthetic budget fail-closed fixture"
+
+port ReviewPlan version "1.0.0" {
+  builtin manual.review
+  in {
+    title: String
+    instructions: String
+  }
+  out {
+    approved: Boolean
+    reviewId: ID
+  }
+  effect human
+}
+
+flow PricedRun title "Priced run" ${flowHeader} create {
+  needs { ReviewPlan }
+  input {
+    subject: String required
+  }
+  steps {
+    review "Review" {
+      uses { subject }
+      call ReviewPlan
+      output {
+        approved: Boolean
+        reviewId: ID
+      }
+    }
+  }
+  output {
+    approved: Boolean from approved
+    reviewId: ID from reviewId
+  }
+  ui { layout form primary "Run" }
+}
+`;
+
+const PRICING_HARNESS_PRESET = `id: dev
+kind: api
+model: strong
+toolBoundary: none
+loopCap: 1
+outputContract: artifact
+permission: read-only
+`;
+
 function syntheticVault(id = "vault-synthetic"): WorkflowVaultProjection {
   return {
     id,
@@ -196,6 +287,39 @@ async function installPack(sourcePath: string): Promise<WorkflowDomainPackProjec
   return projection;
 }
 
+async function installPricingPack(
+  root: string,
+  flowHeader: string,
+): Promise<WorkflowDomainPackProjection> {
+  const packDir = path.join(root, "pricing-pack");
+  fs.mkdirSync(path.join(packDir, "harness"), { recursive: true });
+  fs.writeFileSync(path.join(packDir, "main.ord"), PRICING_PACK_SOURCE(flowHeader), "utf8");
+  fs.writeFileSync(path.join(packDir, "harness", "dev.yaml"), PRICING_HARNESS_PRESET, "utf8");
+  return installPack(packDir);
+}
+
+/** Saves and restores the CLH env keys the run-start pricing gate reads. */
+function saveClhEnvironment(): Record<string, string | undefined> {
+  const keys = [
+    "POLARIS_CLH_ENDPOINT",
+    "POLARIS_CLH_API_KEY",
+    "POLARIS_CLH_LIGHT_MODEL",
+    "POLARIS_CLH_STRONG_MODEL",
+    "POLARIS_CLH_STRONG_PRICE_INPUT_PER_MTOK",
+    "POLARIS_CLH_STRONG_PRICE_OUTPUT_PER_MTOK",
+  ];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  return previous;
+}
+
+function restoreClhEnvironment(previous: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(previous)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
 function serviceFor(
   pack: WorkflowDomainPackProjection,
   options: {
@@ -244,6 +368,132 @@ test("driver=none executes a durable workflow on the Polaris host without a Vaul
     assert.equal(completed?.artifacts.length, 1);
   } finally {
     service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("a failing host tool threads its stable error code and values into the run record", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    // Missing CLH credentials make the tool fail closed deterministically.
+    delete process.env["POLARIS_CLH_ENDPOINT"];
+    delete process.env["POLARIS_CLH_API_KEY"];
+    const sourcePath = path.join(fixture.root, "threading-pack.ord");
+    fs.writeFileSync(sourcePath, THREADING_PACK_SOURCE, "utf8");
+    const pack = await installPack(sourcePath);
+    service = serviceFor(pack, { vaults: [] });
+    const admitted = await service.createRun("tenant-threading", {
+      packId: pack.id,
+      flowId: "BuildKnowledge",
+      driver: "none",
+      values: { cveId: "CVE-SYNTH-0001", cveDescription: "synthetic vulnerability" },
+    });
+    const listed = await service.listRuns("tenant-threading");
+    const failed = listed.runs.find((run) => run.id === admitted.id);
+    assert.equal(failed?.status, "failed");
+    // The run record carries the tool's stable CLH error code and values
+    // (PRD 3.14) instead of a generic execution failure.
+    assert.equal(failed?.error?.code, "CLH_MISSING_CREDENTIAL");
+    assert.equal(failed?.error?.values?.["envVar"], "POLARIS_CLH_ENDPOINT");
+    // The failed step's receipt keeps the same code plus structured values.
+    const receipt = failed?.receipts.find((entry) => entry.stepId === "build");
+    assert.equal(receipt?.errorCode, "CLH_MISSING_CREDENTIAL");
+    assert.equal(receipt?.errorValues?.["envVar"], "POLARIS_CLH_ENDPOINT");
+    assert.equal(failed?.steps[0]?.status, "failed");
+  } finally {
+    service?.close();
+    restoreEnvironment(fixture);
+  }
+});
+
+test("a declared budget fails the run closed when preset pricing is unresolvable", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  const clhPrevious = saveClhEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    // PRD 3.14.8: the strong-tier preset resolves to a gateway model with no
+    // env price override and no catalog entry, so the declared budget could
+    // never accrue; the run must be rejected before its first step.
+    process.env["POLARIS_CLH_STRONG_MODEL"] = "openai/gpt-oss-20b";
+    const pack = await installPricingPack(fixture.root, "budgetUsd 5.0");
+    service = serviceFor(pack, { vaults: [] });
+    const admitted = await service.createRun("tenant-pricing", {
+      packId: pack.id,
+      flowId: "PricedRun",
+      driver: "none",
+      values: { subject: "priced run" },
+    });
+    const listed = await service.listRuns("tenant-pricing");
+    const failed = listed.runs.find((run) => run.id === admitted.id);
+    assert.equal(failed?.status, "failed");
+    assert.equal(failed?.error?.code, "CLH_PRICING_UNRESOLVED");
+    assert.equal(failed?.error?.values?.["unresolvedModels"], "openai/gpt-oss-20b");
+    assert.equal(failed?.error?.values?.["budgetUsd"], 5);
+    // The gate fires before the flow body: no steps, no receipts.
+    assert.equal(failed?.steps.length, 0);
+    assert.equal(failed?.receipts.length, 0);
+  } finally {
+    service?.close();
+    restoreClhEnvironment(clhPrevious);
+    restoreEnvironment(fixture);
+  }
+});
+
+test("an env price override lets a budget-declaring run start", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  const clhPrevious = saveClhEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    process.env["POLARIS_CLH_STRONG_MODEL"] = "openai/gpt-oss-20b";
+    // The env override makes the declared budget accruable, so the gate passes.
+    process.env["POLARIS_CLH_STRONG_PRICE_INPUT_PER_MTOK"] = "0.3";
+    process.env["POLARIS_CLH_STRONG_PRICE_OUTPUT_PER_MTOK"] = "1.2";
+    const pack = await installPricingPack(fixture.root, "budgetUsd 5.0");
+    service = serviceFor(pack, { vaults: [] });
+    const admitted = await service.createRun("tenant-pricing-override", {
+      packId: pack.id,
+      flowId: "PricedRun",
+      driver: "none",
+      values: { subject: "priced run" },
+    });
+    const listed = await service.listRuns("tenant-pricing-override");
+    const completed = listed.runs.find((run) => run.id === admitted.id);
+    // Past the gate, the run proceeds into normal execution (the human-effect
+    // port parks it waiting for approval; the gate must not have failed it).
+    assert.equal(completed?.status, "waiting");
+    assert.notEqual(completed?.error?.code, "CLH_PRICING_UNRESOLVED");
+  } finally {
+    service?.close();
+    restoreClhEnvironment(clhPrevious);
+    restoreEnvironment(fixture);
+  }
+});
+
+test("without a declared budget an unresolvable preset model keeps the run startable", { concurrency: false }, async () => {
+  const fixture = testEnvironment();
+  const clhPrevious = saveClhEnvironment();
+  let service: WorkflowControlService | undefined;
+  try {
+    // PRD 3.14.8: no budget declaration means no gate; costUsd stays honestly
+    // undefined instead of failing the run.
+    process.env["POLARIS_CLH_STRONG_MODEL"] = "openai/gpt-oss-20b";
+    const pack = await installPricingPack(fixture.root, "");
+    service = serviceFor(pack, { vaults: [] });
+    const admitted = await service.createRun("tenant-pricing-unbudgeted", {
+      packId: pack.id,
+      flowId: "PricedRun",
+      driver: "none",
+      values: { subject: "unbudgeted run" },
+    });
+    const listed = await service.listRuns("tenant-pricing-unbudgeted");
+    const completed = listed.runs.find((run) => run.id === admitted.id);
+    // Unbudgeted runs keep the pre-D6 behavior: no gate, no rejection.
+    assert.equal(completed?.status, "waiting");
+    assert.notEqual(completed?.error?.code, "CLH_PRICING_UNRESOLVED");
+  } finally {
+    service?.close();
+    restoreClhEnvironment(clhPrevious);
     restoreEnvironment(fixture);
   }
 });

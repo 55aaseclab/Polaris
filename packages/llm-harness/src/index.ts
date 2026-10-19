@@ -6,5 +6,6 @@ export * from "./env.js";
 export * from "./errors.js";
 export * from "./j2.js";
 export * from "./patch-yaml.js";
+export * from "./pricing.js";
 export * from "./schema.js";
 export * from "./session-log.js";

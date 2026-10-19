@@ -27,6 +27,9 @@ import {
 } from "./workflow-live-worker-binding.js";
 import { WorkflowToolDispatcher } from "./workflow-tool-dispatcher.js";
 import {
+  evaluateRunPricingGate,
+} from "./workflow-pricing-gate.js";
+import {
   REQUIRED_WORKFLOW_LIVE_GATES,
   WORKFLOW_LIVE_ADAPTER_FLAG,
   WORKFLOW_LIVE_PROJECTION_EXECUTOR_FAMILY,
@@ -58,6 +61,7 @@ import type {
 } from "@polaris/polaris-shell";
 import {
   loadVerifiedDomainPackRuntime,
+  verifiedDomainPackHarnessRoot,
 } from "../../config/domain-packs.js";
 import {
   getPolarisControlStore,
@@ -445,6 +449,38 @@ type WorkflowStepVerdict = {
   values?: Record<string, string | number>;
 };
 
+const TOOL_ERROR_CODE_KEY = "errorCode";
+const TOOL_ERROR_VALUES_KEY = "errorValuesJson";
+
+/** PRD 3.14: a failed tool's partial output carries its stable error code
+ * and structured values (flattened to JSON by the dispatcher); parse them
+ * back out so the receipt and the run record keep the real cause. */
+function toolErrorFromOutput(
+  output: FfiInvokeResult["output"],
+): { code?: string; values?: Record<string, string | number> } | undefined {
+  const code = output[TOOL_ERROR_CODE_KEY];
+  const rawValues = output[TOOL_ERROR_VALUES_KEY];
+  let values: Record<string, string | number> | undefined;
+  if (typeof rawValues === "string" && rawValues.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(rawValues);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        values = Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>)
+            .filter((entry): entry is [string, string | number] =>
+              typeof entry[1] === "string" || typeof entry[1] === "number"),
+        );
+      }
+    } catch {
+      values = undefined;
+    }
+  }
+  if (typeof code !== "string" || !code.trim()) {
+    return values && Object.keys(values).length > 0 ? { values } : undefined;
+  }
+  return { code, ...(values && Object.keys(values).length > 0 ? { values } : {}) };
+}
+
 class WorkflowRpcHost implements AsyncFfiHost {
   readonly log: FfiCallLog[] = [];
   readonly rpcLog: Array<{
@@ -502,6 +538,24 @@ class WorkflowRpcHost implements AsyncFfiHost {
    * caps are untripped. The run executor reads this after the flow aborts. */
   runStopVerdict(): WorkflowStepVerdict | null {
     return this.runStop;
+  }
+
+  /** PRD 3.14: the last failed non-live receipt's stable error code and
+   * structured values, for threading into the run record; null when nothing
+   * failed. Policy verdicts and tool-reported codes both surface here. */
+  lastStepFailure(): { code: string; message?: string; values?: Record<string, string | number> } | null {
+    for (let index = this.rpcLog.length - 1; index >= 0; index -= 1) {
+      const entry = this.rpcLog[index];
+      if (!entry || entry.request.mode === "live" || entry.response.status !== "failed") continue;
+      const code = entry.response.error?.code;
+      if (!code) continue;
+      return {
+        code,
+        ...(entry.response.error?.message ? { message: entry.response.error.message } : {}),
+        ...(entry.errorValues ? { values: entry.errorValues } : {}),
+      };
+    }
+    return null;
   }
 
   /** PRD 3.10.9: the compiled pack's flow-level budget declaration for the
@@ -978,14 +1032,18 @@ class WorkflowRpcHost implements AsyncFfiHost {
               values: { timeout: timeoutMs },
             }
           : undefined);
-      const response: FfiRpcResponse = this.dispatcherRpcResponse(request, outcome.result, verdict);
+      // PRD 3.14: a failed tool's stable error code/values ride the receipt
+      // unless a step-policy verdict owns the failure.
+      const toolError = toolErrorFromOutput(outcome.result.output);
+      const errorValues = verdict?.values ?? toolError?.values;
+      const response: FfiRpcResponse = this.dispatcherRpcResponse(request, outcome.result, verdict, toolError?.code);
       last = this.logRpcInvocation({
         req,
         request,
         response,
         evidenceRecorded: false,
         ...(annotate ? { attempt, attemptCount: policy.maxAttempts } : {}),
-        ...(verdict?.values ? { errorValues: verdict.values } : {}),
+        ...(errorValues ? { errorValues } : {}),
       });
       if (finalVerdict) {
         const error = runStopAfter
@@ -1037,6 +1095,7 @@ class WorkflowRpcHost implements AsyncFfiHost {
     request: FfiRpcRequest,
     result: FfiInvokeResult,
     verdict?: WorkflowStepVerdict,
+    toolErrorCode?: string,
   ): FfiRpcResponse {
     const completedAt = this.options.now().toISOString();
     return {
@@ -1061,7 +1120,7 @@ class WorkflowRpcHost implements AsyncFfiHost {
             },
           }
         : result.error
-          ? { error: { code: "common-tool-failed", message: result.error } }
+          ? { error: { code: toolErrorCode ?? "common-tool-failed", message: result.error } }
           : {}),
     };
   }
@@ -1985,6 +2044,32 @@ export class WorkflowControlService {
       return;
     }
     const program = runtime.pipeline.program!;
+    // PRD 3.14.8: a declared flow/run budget must be able to accrue. When the
+    // pinned pack's harness presets resolve to models whose pricing is
+    // unresolvable (no env override, no catalog entry), the run fails closed
+    // before its first step instead of silently spending past the cap.
+    const gateFlow = program.flows.find((candidate) => candidate.meta.name === run.flowId);
+    const gatePolicy = readRunPolicy(
+      process.env,
+      gateFlow ? { budgetUsd: gateFlow.meta.budgetUsd, timeoutMs: gateFlow.meta.timeoutMs } : undefined,
+    );
+    const pricingGate = evaluateRunPricingGate({
+      harnessRoot: verifiedDomainPackHarnessRoot(
+        this.options.importMetaUrl,
+        run.packId,
+        run.packVersion,
+        run.packDigest,
+      ),
+      budgetUsd: gatePolicy.budgetUsd,
+      environment: process.env,
+    });
+    if (pricingGate) {
+      const detail = Object.entries(pricingGate.values)
+        .map(([key, value]) => `${key}=${String(value)}`)
+        .join(", ");
+      this.fail(run, pricingGate.code, `${pricingGate.code} (${detail})`, pricingGate.values);
+      return;
+    }
     const host = new WorkflowRpcHost(run, program, {
       store: this.store,
       environment: process.env,
@@ -2054,6 +2139,13 @@ export class WorkflowControlService {
       const stop = host.runStopVerdict();
       if (stop) {
         this.fail(run, stop.code, runStopFailureMessage(stop), stop.values ?? undefined);
+        return;
+      }
+      // PRD 3.14: thread the failing step's stable error code/values into the
+      // run record so the control plane never reads an empty error.
+      const stepFailure = host.lastStepFailure();
+      if (stepFailure) {
+        this.fail(run, stepFailure.code, stepFailure.message ?? result.message, stepFailure.values);
         return;
       }
       this.fail(run, "workflow-execution-failed", result.message);

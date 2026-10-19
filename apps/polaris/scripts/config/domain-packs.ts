@@ -841,31 +841,59 @@ export function loadVerifiedDomainPackRuntime(
   digestInput: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): VerifiedDomainPackRuntime {
-  const id = assertDomainPackId(idInput);
-  const version = canonicalPackVersion(versionInput);
-  const digest = digestInput.trim().replace(/^sha256:/u, "");
   const installed = availableDomainPacks(importMetaUrl, environment);
-  const pack = installed.find((candidate) =>
-    candidate.id === id
-    && candidate.version === version
-    && candidate.status === "verified"
-    && candidate.sha256 === digest,
-  );
+  const pack = findPinnedPack(installed, idInput, versionInput, digestInput);
   if (!pack) {
-    throw new Error(`Verified Domain Pack pin is unavailable: ${id}@${version} sha256:${digest}`);
+    throw new Error(`Verified Domain Pack pin is unavailable: ${assertDomainPackId(idInput)}@${canonicalPackVersion(versionInput)} sha256:${digestInput.trim().replace(/^sha256:/u, "")}`);
   }
   const pipeline = runPipeline(pack.source, {
     loader: packLoader(installed),
     toolResolver: toolResolver(importMetaUrl),
   });
   if (!pipeline.ok || !pipeline.program || !pipeline.ast) {
-    throw new Error(`Pinned Domain Pack cannot be executed: ${id}@${version}`);
+    throw new Error(`Pinned Domain Pack cannot be executed: ${pack.id}@${pack.version}`);
   }
   return {
     summary: summaryFromStored(pack),
     source: pack.source,
     pipeline,
   };
+}
+
+function findPinnedPack(
+  installed: StoredDomainPack[],
+  idInput: string,
+  versionInput: string,
+  digestInput: string,
+): StoredDomainPack | undefined {
+  const id = assertDomainPackId(idInput);
+  const version = canonicalPackVersion(versionInput);
+  const digest = digestInput.trim().replace(/^sha256:/u, "");
+  return installed.find((candidate) =>
+    candidate.id === id
+    && candidate.version === version
+    && candidate.status === "verified"
+    && candidate.sha256 === digest,
+  );
+}
+
+/**
+ * PRD 3.14.8: the pinned pack's vendored harness presets directory, or
+ * undefined when the pin is unavailable or the pack ships no harness/ dir.
+ * The run-start pricing gate reads the preset model tiers from here.
+ */
+export function verifiedDomainPackHarnessRoot(
+  importMetaUrl: string,
+  idInput: string,
+  versionInput: string,
+  digestInput: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const installed = availableDomainPacks(importMetaUrl, environment);
+  const pack = findPinnedPack(installed, idInput, versionInput, digestInput);
+  if (!pack) return undefined;
+  const harnessRoot = path.join(path.dirname(pack.sourcePathAbsolute), "harness");
+  return fs.existsSync(harnessRoot) ? harnessRoot : undefined;
 }
 
 export async function addDomainPack(

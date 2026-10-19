@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -68,7 +68,13 @@ test("session log summary extracts tool calls, usage, turns, and final text", ()
   assert.equal(summary.toolCalls.length, 2);
   assert.equal(summary.toolCalls[0]?.name, "bash");
   assert.equal(summary.toolCalls[1]?.callId, "call-2");
-  assert.deepEqual(summary.tokens, { inputTokens: 150, outputTokens: 30, totalTokens: 200 });
+  assert.deepEqual(summary.tokens, {
+    inputTokens: 150,
+    outputTokens: 30,
+    totalTokens: 200,
+    cachedTokens: 20,
+    cachedTokensSource: "usage-details",
+  });
   assert.equal(summary.turnCount, 1);
   assert.equal(summary.finalText, "final answer");
   assert.equal(summary.endedReason, "completed");
@@ -171,7 +177,13 @@ test("wrapper runs a mock dsh end-to-end and parses the synthetic session log", 
     });
     assert.equal(receipt.exitCode, 0);
     assert.equal(receipt.toolCalls, 2);
-    assert.deepEqual(receipt.tokens, { inputTokens: 150, outputTokens: 30, totalTokens: 200 });
+    assert.deepEqual(receipt.tokens, {
+      inputTokens: 150,
+      outputTokens: 30,
+      totalTokens: 200,
+      cachedTokens: 20,
+      cachedTokensSource: "usage-details",
+    });
     assert.equal(receipt.turnCount, 1);
     assert.equal(receipt.finalText, "final answer");
     assert.ok(receipt.sessionLogPath);
@@ -224,6 +236,206 @@ test("wrapper fails closed when no session log exists", async () => {
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("wrapper resolves the dsh timeout as explicit option over preset over env", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "clh-home-"));
+  const workspace = await mkdtemp(path.join(tmpdir(), "clh-ws-"));
+  const previousKey = process.env["POLARIS_CLH_API_KEY"];
+  const previousLogFixture = process.env["CLH_MOCK_LOG_FIXTURE"];
+  try {
+    const mockDsh = await writeSleepingMockDsh(home);
+    process.env["POLARIS_CLH_API_KEY"] = "sk-synthetic-placeholder";
+    process.env["CLH_MOCK_LOG_FIXTURE"] = path.join(home, "log-fixture.jsonl");
+    const { preset: plainPreset } = validatePreset({
+      kind: "open",
+      model: "light",
+      toolBoundary: "full",
+      loopCap: 60,
+      outputContract: "artifact",
+      permission: "workspace-write",
+    });
+    const { preset: longPreset } = validatePreset({
+      kind: "open",
+      model: "light",
+      toolBoundary: "full",
+      loopCap: 60,
+      outputContract: "artifact",
+      permission: "workspace-write",
+      timeoutMs: 10_000,
+    });
+    const baseEnv = { ...syntheticEnv(), dshBin: mockDsh, dshHome: home };
+    const run = (preset: typeof plainPreset, timeoutMs?: number) =>
+      runDshPreset({
+        preset,
+        presetDir: fixturesDir,
+        taskContext: { task: "synthetic task" },
+        env: { ...baseEnv, apiTimeoutMs: 50 },
+        workspaceRoot: workspace,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      });
+    // preset.timeoutMs overrides the env fallback; the 300ms mock dsh survives.
+    const receipt = await run(longPreset);
+    assert.equal(receipt.exitCode, 0);
+    // The env fallback applies when the preset declares no timeoutMs.
+    await assert.rejects(
+      () => run(plainPreset),
+      (error: unknown) => {
+        assert.ok(error instanceof ClhError && error.code === "CLH_API_TIMEOUT");
+        assert.equal(error.details["timeoutMs"], 50);
+        assert.equal(error.details["tier"], "light");
+        return true;
+      },
+    );
+    // An explicit option overrides the preset declaration.
+    await assert.rejects(
+      () => run(longPreset, 50),
+      (error: unknown) => error instanceof ClhError && error.code === "CLH_API_TIMEOUT",
+    );
+  } finally {
+    if (previousKey === undefined) delete process.env["POLARIS_CLH_API_KEY"];
+    else process.env["POLARIS_CLH_API_KEY"] = previousKey;
+    if (previousLogFixture === undefined) delete process.env["CLH_MOCK_LOG_FIXTURE"];
+    else process.env["CLH_MOCK_LOG_FIXTURE"] = previousLogFixture;
+    await rm(home, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("session log cached split covers detail disclosure, OpenAI passthrough, inference, and zero", () => {
+  const summarize = (usage: Record<string, unknown>) =>
+    summarizeSessionLog("synthetic-session.jsonl", parseJsonl([
+      JSON.stringify({ type: "session", version: 4, id: "s1", createdAt: 1, cwd: "/tmp/clh-synthetic-workspace" }),
+      JSON.stringify({ type: "assistant/message", seq: 1, time: 2, data: { usage } }),
+    ].join("\n")));
+  // dsh detail field.
+  assert.deepEqual(summarize({ inputTokens: 100, outputTokens: 20, totalTokens: 130, cachedTokens: 10 }).tokens, {
+    inputTokens: 100,
+    outputTokens: 20,
+    totalTokens: 130,
+    cachedTokens: 10,
+    cachedTokensSource: "usage-details",
+  });
+  // OpenAI-style prompt_tokens_details passthrough.
+  assert.deepEqual(
+    summarize({ inputTokens: 100, outputTokens: 20, totalTokens: 130, prompt_tokens_details: { cached_tokens: 10 } }).tokens,
+    {
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 130,
+      cachedTokens: 10,
+      cachedTokensSource: "usage-details",
+    },
+  );
+  // No detail field: the cache-read split is inferred from the total.
+  assert.deepEqual(summarize({ inputTokens: 50, outputTokens: 10, totalTokens: 70 }).tokens, {
+    inputTokens: 50,
+    outputTokens: 10,
+    totalTokens: 70,
+    cachedTokens: 10,
+    cachedTokensSource: "inferred",
+  });
+  // total == input + output: zero cached reads.
+  assert.deepEqual(summarize({ inputTokens: 50, outputTokens: 10, totalTokens: 60 }).tokens, {
+    inputTokens: 50,
+    outputTokens: 10,
+    totalTokens: 60,
+    cachedTokens: 0,
+    cachedTokensSource: "inferred",
+  });
+  // Missing total falls back to input + output: zero cached reads.
+  assert.deepEqual(summarize({ inputTokens: 50, outputTokens: 10 }).tokens, {
+    inputTokens: 50,
+    outputTokens: 10,
+    totalTokens: 60,
+    cachedTokens: 0,
+    cachedTokensSource: "inferred",
+  });
+});
+
+test("wrapper bills the dsh session with cached-separate semantics end to end", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "clh-home-"));
+  const workspace = await mkdtemp(path.join(tmpdir(), "clh-ws-"));
+  const previousKey = process.env["POLARIS_CLH_API_KEY"];
+  const previousLogFixture = process.env["CLH_MOCK_LOG_FIXTURE"];
+  try {
+    const mockDsh = await writeMockDsh(home);
+    // Live-run shape: total 947000 = input 34000 + output 25000 + cached 888000;
+    // no detail field, so the cache-read split is inferred from the total.
+    const events = [
+      { type: "session", version: 4, id: "session-synthetic-2", createdAt: 1, cwd: workspace },
+      { type: "permission/preset", seq: 0, time: 1, data: { preset: "workspace-write" } },
+      { type: "turn/start", seq: 1, time: 2, data: { turn: 1 } },
+      { type: "tool/call", seq: 2, time: 3, data: { turn: 1, step: 1, callId: "call-1", name: "bash", arguments: "{}" } },
+      { type: "tool/result", seq: 3, time: 4, data: { turn: 1, step: 1, callId: "call-1" } },
+      {
+        type: "assistant/message",
+        seq: 4,
+        time: 5,
+        data: {
+          turn: 1,
+          step: 1,
+          message: { role: "assistant", content: [{ type: "text", text: "final answer" }] },
+          usage: { inputTokens: 34000, outputTokens: 25000, totalTokens: 947000 },
+        },
+      },
+      { type: "turn/end", seq: 5, time: 6, data: { turn: 1, reason: { kind: "completed" } } },
+    ];
+    const fixturePath = path.join(home, "cached-fixture.jsonl");
+    await writeFile(fixturePath, events.map((event) => JSON.stringify(event)).join("\n") + "\n", "utf8");
+    process.env["POLARIS_CLH_API_KEY"] = "sk-synthetic-placeholder";
+    process.env["CLH_MOCK_LOG_FIXTURE"] = fixturePath;
+    const { preset } = validatePreset({
+      kind: "open",
+      model: "strong",
+      toolBoundary: "full",
+      loopCap: 60,
+      outputContract: "artifact",
+      permission: "workspace-write",
+    });
+    const env = {
+      ...syntheticEnv(),
+      models: { light: syntheticEnv().models.light, strong: "deepseek-ai/DeepSeek-V4.1-Flash" },
+      dshBin: mockDsh,
+      dshHome: home,
+    };
+    const receipt = await runDshPreset({
+      preset,
+      presetDir: fixturesDir,
+      taskContext: { task: "synthetic task" },
+      env,
+      workspaceRoot: workspace,
+    });
+    assert.equal(receipt.exitCode, 0);
+    assert.deepEqual(receipt.tokens, {
+      inputTokens: 34000,
+      outputTokens: 25000,
+      totalTokens: 947000,
+      cachedTokens: 888000,
+      cachedTokensSource: "inferred",
+    });
+    // DeepSeek peak catalog pricing: 34000 x $0.3 + 888000 x $0.006 + 25000 x $1.2 per MTok.
+    assert.ok(
+      Math.abs((receipt.costUsd ?? 0) - (0.0102 + 0.005328 + 0.03)) < 1e-12,
+      `unexpected costUsd: ${receipt.costUsd}`,
+    );
+  } finally {
+    if (previousKey === undefined) delete process.env["POLARIS_CLH_API_KEY"];
+    else process.env["POLARIS_CLH_API_KEY"] = previousKey;
+    if (previousLogFixture === undefined) delete process.env["CLH_MOCK_LOG_FIXTURE"];
+    else process.env["CLH_MOCK_LOG_FIXTURE"] = previousLogFixture;
+    await rm(home, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+async function writeSleepingMockDsh(home: string): Promise<string> {
+  const binPath = await writeMockDsh(home);
+  let script = await readFile(binPath, "utf8");
+  script = `sleep 0.3\n${script}`;
+  await writeFile(binPath, script, "utf8");
+  await chmod(binPath, 0o755);
+  return binPath;
+}
 
 async function writeMockDsh(home: string): Promise<string> {
   const script = [
