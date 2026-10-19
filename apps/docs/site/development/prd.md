@@ -1,6 +1,6 @@
 # Polaris Product Requirements Document (PRD)
 
-Version: V2.6.0
+Version: V3.0.0
 
 | Version | Date       | Author   | Notes |
 |---------|-----------|----------|-------|
@@ -20,6 +20,7 @@ Version: V2.6.0
 | V2.4.0 | 2026/10/17 | opencode | Added 3.11.8 pack self-containment: domain-specific tools ship with the pack (pack-local tools + full install); capability ownership ruling — CLH global (packages/llm-harness), paper-reproduction tools pack-specific, existing autoresearch globals untouched |
 | V2.5.0 | 2026/10/17 | opencode | 3.14 hardening (four defects proven by the CVE comparison run): preset schema adds per-preset `timeoutMs`; api backend switches to streaming (long generations no longer cut off by the gateway); call-level 429/transient backoff into 3.14.4 (attempt-internal convergence, owned by CLH); step-failure error values thread through |
 | V2.6.0 | 2026/10/18 | opencode | Ruling (second CVE comparison run: budget cap silently inert): built-in official pricing catalog (family → per-MTok, env override > catalog > none); fail-closed at run start with a declared flow/run budget and unresolvable pricing (stable code), never silent zero accrual — resolves 3.11.4 [TBD], no estimation |
+| V3.0.0 | 2026/10/19 | opencode | Third product pillar: 3.15 observability panel (cost / reliability / quality / evaluation views over existing tables — no new collection); 1.1.1 restated as three pillars (pillars 1-2 generate the evidence, pillar 3 makes it legible); the north-star success-rate and rescue-rate metrics become computable from receipts |
 
 ---
 
@@ -40,11 +41,18 @@ unified control plane:
   and there is no record of "what a given step may touch";
 - Runs leave no receipts or artifacts, so failures cannot be traced;
 - Identity, quota, lifecycle, and audit are scattered everywhere,
-  leaving fuzzy permission boundaries.
+  leaving fuzzy permission boundaries;
+- Receipts, budgets, and artifacts accumulate as audit stubs: cost,
+  reliability, and quality evidence piles up, but no surface makes it
+  legible enough to act on.
 
-Polaris's answer: a DSL + Domain Pack carries "what the work is", and a
-self-hosted control plane carries "who can run it, how it runs, and
-what evidence it leaves".
+Polaris's answer rests on three pillars: a DSL + Domain Pack carries
+"what the work is" (domain-agnostic and reusable); a self-hosted
+control plane carries "who can run it, how it runs, and what evidence
+it leaves" (identity, quota, budgets, receipts, audit); and a
+visualization panel turns that evidence into decisions — cost against
+budget, success and rescue rates, artifact quality. Pillars one and
+two generate the evidence; pillar three makes it legible.
 
 > Requirements health-check note: this document is the sole ground
 > truth of the Polaris product — scope, process, and priority defer to
@@ -76,6 +84,11 @@ adoption cost of a new workflow domain.
 | Lower migration cost (north star 2) | Retry rescue rate: eventually succeeded after retries / ever failed | Set after measuring a baseline [TBD] | Ongoing |
 | Lower trust cost (north star 3) | Traceability completeness: terminal runs can answer "who, when, which version, inputs and outputs" | 100% | Achieved |
 | Least privilege | Executors can only run pinned definitions while holding a valid lease | 100% enforced | Achieved |
+
+Metrics are computed and surfaced by the observability panel (3.15):
+run success rate and retry rescue rate derive from receipts and step
+results, so the two [TBD] baselines above become measurable without
+new collection.
 
 **User goals**
 
@@ -1193,6 +1206,47 @@ never enters the contract.
   in the wrapper, eliminating hand-written hard-coded logic inside
   tools.
 
+### 3.15 Observability panel (evaluation and UX)
+
+#### 3.15.1 Description
+The third pillar: the control plane already records receipts, budget
+accrual, attempt grouping, failure classifications, and artifact
+outcomes; the panel turns that recorded evidence into decision
+surfaces. No new data collection — every view reads existing tables
+(workflow runs, step results, effect receipts, artifacts). Live-run
+evidence (CVE-2024-4340): costUsd accrual, retry rescue, and failure
+taxonomies are already recorded per run; without a surface they stay
+audit stubs.
+
+Four views (v1):
+
+| View | Content | Data source |
+|------|---------|-------------|
+| Cost | per-run costUsd accrual vs the declared budget cap; cached-read share of tokens | effect receipts (costUsd, cachedTokens) + flow meta (budgetUsd) |
+| Reliability | success rate per flow; failure taxonomy (timeout / budget / contract); retry rescue rate (eventually succeeded after retries / ever failed); step- and run-level attempt counts | workflow runs + step results + receipts |
+| Quality | PoC rubric per run — five binary criteria: boundary probe, patched-version contrast, minimal reproduction, DoS semantics, verifier independence | artifacts + verify results |
+| Evaluation | cross-run and cross-system comparison (success rate, cost, time, rubric) | aggregated runs |
+
+#### 3.15.2 User stories
+```
+As a submitter, I want to see a run's cost accrual against its budget
+cap and where the tokens went, so that cost is visible, not implicit.
+As an operator, I want success rate and rescue rate per flow with a
+failure taxonomy, so that reliability is a number, not an anecdote.
+As an evaluator, I want cross-run comparison on one page, so that
+system changes are judged on data.
+```
+
+#### 3.15.3 Acceptance view
+- Every view reads only existing tables — no new collection;
+- Rescue rate and success rate are computed from receipts (the
+  north-star [TBD] metrics become measurable);
+- Default views respect role scoping (observer read-only).
+
+#### 3.15.4 Non-goals (v1)
+- No alerting, no custom user dashboards, no export beyond the
+  existing artifact export.
+
 ---
 
 ## 4. Non-functional requirements (notes)
@@ -1287,6 +1341,8 @@ tables need review. [TBD]
 | CLH | Invalid presets rejected; compiler output validates against the backend schema; the wrapper parses session logs into receipts (costUsd/tokens); a single api-backend call includes billing readback; missing credentials fail closed | P0 |
 | CLH hardening | api backend streams (minute-scale long generations not cut off by the gateway); 429/transient bounded backoff (call-level, attempt-internal); per-preset `timeoutMs` accepted with env fallback; step-failure error values enter the run record | P0 | Delivered (2026/10/18): live run all 6 steps green |
 | Pricing threading | Declared budget + unresolvable pricing → fail-closed before run start (`CLH_PRICING_UNRESOLVED`); models hit by the built-in catalog resolve costUsd without env, including cached-read billing | P0 | Delivered (2026/10/18): live run costUsd ≈$1.11 truly accrued (cached 556K/857K/661K at catalog prices) |
+| Observability panel | The four views (cost / reliability / quality / evaluation) render from existing tables only; rescue rate and success rate are computable from receipts; views respect role scoping (observer read-only) | P0 |
+| Observability panel | Four views (cost / reliability / quality / evaluation) render from existing tables; rescue rate and success rate computable from receipts; role scoping respected | P0 | see 3.15 |
 | Pack self-containment | Pack-local tool resolution takes precedence over the global `tools/`; the installed artifact contains `tools/` and `harness/`; removing a pack removes its local tools; existing autoresearch pack install/run without regression | P0 |
 
 ---
