@@ -34,6 +34,9 @@ importers:
 
   apps/polaris:
     dependencies:
+      '@polaris/llm-harness':
+        specifier: workspace:*
+        version: link:../../packages/llm-harness
       '@polaris/polaris-auth-server':
         specifier: workspace:*
         version: link:../../packages/polaris-auth-server
