@@ -1,6 +1,6 @@
 # Polaris Product Requirements Document (PRD)
 
-Version: V3.0.0
+Version: V3.1.0
 
 | Version | Date       | Author   | Notes |
 |---------|-----------|----------|-------|
@@ -21,6 +21,7 @@ Version: V3.0.0
 | V2.5.0 | 2026/10/17 | opencode | 3.14 hardening (four defects proven by the CVE comparison run): preset schema adds per-preset `timeoutMs`; api backend switches to streaming (long generations no longer cut off by the gateway); call-level 429/transient backoff into 3.14.4 (attempt-internal convergence, owned by CLH); step-failure error values thread through |
 | V2.6.0 | 2026/10/18 | opencode | Ruling (second CVE comparison run: budget cap silently inert): built-in official pricing catalog (family → per-MTok, env override > catalog > none); fail-closed at run start with a declared flow/run budget and unresolvable pricing (stable code), never silent zero accrual — resolves 3.11.4 [TBD], no estimation |
 | V3.0.0 | 2026/10/19 | opencode | Third product pillar: 3.15 observability panel (cost / reliability / quality / evaluation views over existing tables — no new collection); 1.1.1 restated as three pillars (pillars 1-2 generate the evidence, pillar 3 makes it legible); the north-star success-rate and rescue-rate metrics become computable from receipts |
+| V3.1.0 | 2026/10/19 | opencode | New domain capability 3.16 media ingestion: one global tool `media.ingest` with three commands (download-video / extract-audio / transcribe), dispatcher protocol + inventory registration, deterministic backends (yt-dlp/ffmpeg, versions pinned) and an env-resolved transcription binding (gateway Whisper-first, local binary fallback), demo flow in a media-ingestion pack |
 
 ---
 
@@ -1247,6 +1248,53 @@ system changes are judged on data.
 - No alerting, no custom user dashboards, no export beyond the
   existing artifact export.
 
+### 3.16 Media ingestion tools
+
+#### 3.16.1 Description
+A generic media-ingestion capability: turn a video URL into a local
+transcript, as three dispatcher-protocol commands of one global tool
+(`media.ingest`) registered in the tool inventory. Download and audio
+extraction are deterministic transformations (no LLM); transcription is
+model-backed with an env-resolved binding. The tools are global
+(cross-domain, like `pdf.capture`), not pack-local — media ingestion is
+not tied to any one Domain Pack.
+
+#### 3.16.2 Commands and backends
+
+| Command | What it does | Backend (pinned) | Output artifact |
+|---------|--------------|------------------|-----------------|
+| download-video | fetch a video by URL into the workspace | `yt-dlp` (version pinned) | video file + provenance (source URL, format, duration) |
+| extract-audio | strip the audio track from a local video | `ffmpeg` (version pinned) | audio file (wav/mp3) |
+| transcribe | speech-to-text on a local audio file | env-resolved binding: OpenAI-compatible `/audio/transcriptions` endpoint (gateway Whisper) first, local whisper binary fallback; missing → fail-closed (3.11.4) | transcript (text + segments with timestamps) |
+
+#### 3.16.3 Contract details
+- Dispatcher protocol conformance (3.11.1): input envelope, out.json
+  receipt, non-zero exit = step failure; step policy (3.10) owns
+  attempts/timeout/budget — the tool does one attempt (3.11.7);
+- costUsd: gateway transcription reads usage back into the receipt;
+  local whisper reports honest null (no estimation, 3.14.8);
+- Provenance: every artifact records its source (URL for downloads,
+  upstream file for extraction, model + language for transcripts);
+- Source compliance: downloads respect the source site's terms and
+  rate limits; the receipt records the resolved URL and format;
+- Registration per 3.11.5: `media.ingest` enters the tool inventory
+  (entrypoint + commands); catalog warnings clear, packs binding it
+  turn green.
+
+#### 3.16.4 Demo flow
+A media-ingestion pack demonstrates the chain end to end: a linear v2
+flow `download-video → extract-audio → transcribe`, step policy on the
+download (network-bound: generous timeoutMs), transcripts land as
+workspace artifacts with provenance.
+
+#### 3.16.5 User stories
+```
+As a packager, I want video/audio/transcription as inventory tools,
+so that media ingestion composes into any flow without product code.
+As a submitter, I want transcripts as workspace artifacts with
+provenance, so that downstream steps can cite them.
+```
+
 ---
 
 ## 4. Non-functional requirements (notes)
@@ -1342,7 +1390,9 @@ tables need review. [TBD]
 | CLH hardening | api backend streams (minute-scale long generations not cut off by the gateway); 429/transient bounded backoff (call-level, attempt-internal); per-preset `timeoutMs` accepted with env fallback; step-failure error values enter the run record | P0 | Delivered (2026/10/18): live run all 6 steps green |
 | Pricing threading | Declared budget + unresolvable pricing → fail-closed before run start (`CLH_PRICING_UNRESOLVED`); models hit by the built-in catalog resolve costUsd without env, including cached-read billing | P0 | Delivered (2026/10/18): live run costUsd ≈$1.11 truly accrued (cached 556K/857K/661K at catalog prices) |
 | Observability panel | The four views (cost / reliability / quality / evaluation) render from existing tables only; rescue rate and success rate are computable from receipts; views respect role scoping (observer read-only) | P0 |
+| Media ingestion | download-video → extract-audio → transcribe chain runs as a flow end to end; missing transcription binding fails closed; every artifact carries provenance (URL / upstream file / model); inventory registration clears catalog warnings | P1 |
 | Observability panel | Four views (cost / reliability / quality / evaluation) render from existing tables; rescue rate and success rate computable from receipts; role scoping respected | P0 | see 3.15 |
+| Tools | Media ingestion (download-video / extract-audio / transcribe) | P1 | One global tool `media.ingest`, dispatcher protocol, deterministic backends pinned, gateway Whisper-first transcription, see 3.16 |
 | Pack self-containment | Pack-local tool resolution takes precedence over the global `tools/`; the installed artifact contains `tools/` and `harness/`; removing a pack removes its local tools; existing autoresearch pack install/run without regression | P0 |
 
 ---
