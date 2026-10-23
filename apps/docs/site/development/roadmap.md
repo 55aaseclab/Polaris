@@ -1,6 +1,6 @@
 # Polaris 2026 Q4 Roadmap
 
-Version: V2.0.0
+Version: V2.1.0
 
 | Version | Date       | Author    | Notes |
 |---------|-----------|-----------|-------|
@@ -15,10 +15,11 @@ Version: V2.0.0
 | V1.8.0 | 2026/10/18 | opencode | Added slice D6 (pricing catalog + budget fail-closed) per PRD V2.6.0 — second comparison run proved the budget cap silently inert; D5 reconciled green |
 | V1.9.0 | 2026/10/18 | opencode | Added slice D7 (run-level maxRuns — run retry count) per PRD 3.10.9; evaluation calibration (1 CVE × 3 runs) starts; version 0.5.0 released |
 | V2.0.0 | 2026/10/19 | opencode | Added slice P (observability panel — cost / reliability / quality / evaluation views) per PRD V3.0.0's third pillar, next window's main piece alongside 3.8; D7 reconciled pending review |
+| V2.1.0 | 2026/10/19 | opencode | Added slice M (media ingestion tools: download-video / extract-audio / transcribe) per PRD V3.1.0; D7 reconciled green |
 
 Cycle: 2026/10/19 ~ 2026/11/27 (6 weeks, 3 iterations).
 Owner: Qiang Liu (solo maintainer).
-Basis: [Polaris PRD](./prd) V3.0.0 (sole ground truth).
+Basis: [Polaris PRD](./prd) V3.1.0 (sole ground truth).
 
 ---
 
@@ -78,6 +79,7 @@ verifiable, never a vertical cut through a single module.
 | D6 pricing catalog and budget fail-closed (PRD 3.14.8) | Integrate / execute / trace | Built-in official price catalog (family → per-MTok, source+as-of); env > catalog > none; declared budget + unresolvable pricing → `CLH_PRICING_UNRESOLVED`; cached reads counted in billing; the rerun verifies the budget cap truly accrues | ~1 person-day | Done (delivered early 2026/10/18; live run costUsd ≈$1.11 accrued + verified=true) |
 | D7 run-level maxRuns (PRD 3.10.9) | Execute / recover | Flow-level `maxRuns <n>` enters the `.ord` grammar; after a run fails the whole run reruns (default 1 behavior unchanged; a brand-new environment each round when 3.8 is active); over-limit `run-retries-exhausted`; the rerun verifies retry rescue | ~0.5 person-day | 🟢 Delivered (2026/10/19; a live eval round-1 setup failure rescued by the run-level retry with cross-round budget accrual) |
 | P observability panel (PRD 3.15) | Full chain (evidence → decisions) | Four views (cost vs budget cap with cached-read share; reliability with success/rescue rates and a failure taxonomy; PoC quality rubric; cross-run evaluation) render from existing tables; role scoping respected | 3~5 person-days | Not started (next window's main piece, alongside 3.8) |
+| M media ingestion tools (PRD 3.16) | Integrate / execute | download-video → extract-audio → transcribe chain runs as a flow end to end; missing transcription binding fails closed; artifacts carry provenance; inventory registration clears catalog warnings | 1~2 person-days | Not started (global tool media.ingest, three commands) |
 | 3 isolated execution (PRD 3.8/3.9, optional) | Integrate / execute / recover | Pollution assertion passes; clean retry measurable | 3~5 person-days | Moved out of this cycle |
 | 4 flesh-out layer (long term) | live UX / performance baseline | — | — | Long term |
 
