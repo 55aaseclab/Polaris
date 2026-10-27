@@ -3,7 +3,7 @@
 Versioned **social publish** contract for Polaris (`clue.social-publish.v1`).
 
 This package freezes the **API surface** first. Platform adapters (browser
-session / official OAuth / `third_party/social-auto-upload`) are wired later;
+session / official OAuth) are wired later;
 until then `publish` validates input and returns `planned` (dry-run) or
 `failed_not_implemented`.
 
@@ -37,5 +37,4 @@ Otherwise stub → `status: failed_not_implemented` (exit 2) after validation.
 
 ## Related
 
-- Forked browser uploaders (optional backend): `third_party/social-auto-upload`
 - Read-side social collection (JustOneAPI): `tools/social-media`

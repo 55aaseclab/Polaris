@@ -4,6 +4,3 @@
 [submodule "third_party/syssec-research-skills"]
 	path = third_party/syssec-research-skills
 	url = git@github.com:cyruscyliu/syssec-research-skills.git
-[submodule "third_party/social-auto-upload"]
-	path = third_party/social-auto-upload
-	url = git@github.com:jianxiaoyitech/social-auto-upload.git

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Contract-first social publish CLI (clue.social-publish.v1).
 
-Adapters (browser / OAuth / sau submodule) are not wired yet. This module
+Adapters (browser / OAuth) are not wired yet. This module
 validates input/output documents and returns structured not-implemented
 results so callers and tests can freeze the v1 surface.
 """
@@ -187,8 +187,7 @@ def build_not_implemented_output(document: dict[str, Any]) -> dict[str, Any]:
             ),
             "retryable": False,
             "resume_hint": (
-                "Wire tools/social-publish adapters (e.g. sau.cli under "
-                "third_party/social-auto-upload) then re-run publish."
+                "Wire tools/social-publish adapters then re-run publish."
             ),
         },
         "run_dir": None,

@@ -16,14 +16,6 @@
       "version": "0.1.0",
       "backend_kind": "stub",
       "note": "Contract-only; publish returns failed_not_implemented until a real adapter is wired."
-    },
-    "sau": {
-      "name": "sau.cli",
-      "version": "unpinned",
-      "backend_kind": "subprocess_cli",
-      "path": "third_party/social-auto-upload",
-      "repository": "git@github.com:jianxiaoyitech/social-auto-upload.git",
-      "note": "Optional fork of dreammis/social-auto-upload. Not required for validate-input/output."
     }
   },
   "run_defaults": {
