@@ -24,7 +24,7 @@ function runMetadata(run,projected=false){
   createdAt:instant(step.createdAt),completedAt:instant(step.completedAt),...(version(step.version)?{version:step.version}:{})
  })).filter(step=>step.stepId);
  const artifactRefs=projected?artifacts.filter(value=>typeof value==='string'&&/^artifact:[a-f0-9]{64}$/.test(value)).slice(0,8):artifacts.slice(0,8).filter(value=>object(value)&&token(value.id)).map(value=>opaque([runId,value.id]));
- return {runId,flowId:token(run.flowId),status:states.has(run.status)?run.status:'unknown',createdAt:instant(run.createdAt),updatedAt:instant(run.updatedAt),
+ return {runId,nativeHref:`/apps/polaris/work/runs/${encodeURIComponent(runId)}`,flowId:token(run.flowId),status:states.has(run.status)?run.status:'unknown',createdAt:instant(run.createdAt),updatedAt:instant(run.updatedAt),
   ...(instant(run.startedAt)?{startedAt:instant(run.startedAt)}:{}),...(token(run.packId)?{packId:run.packId}:{}),
   ...(version(run.flowVersion)?{flowVersion:run.flowVersion}:{}),...(version(run.packVersion)?{packVersion:run.packVersion}:{}),
   steps:visibleSteps,stepCount:projected&&count(run.stepCount)?run.stepCount:steps.length,

@@ -41,6 +41,8 @@ test("mounted browser paths, backend URLs and artifacts share one app prefix", a
   assert.equal(portalPathname(mount + "/"), "/");
   assert.equal(portalPathname(mount + "-other/work"), mount + "-other/work");
   assert.equal(portalPathname(mount + "/settings/workflows"), "/settings/workflows");
+  assert.equal(portalHref("/work/runs/run-one"), mount + "/work/runs/run-one");
+  assert.equal(portalPathname(mount + "/work/runs/run-one"), "/work/runs/run-one");
   assert.equal(portalHref("/work?pack=autoresearch"), mount + "/work?pack=autoresearch");
   assert.equal(streamUrl(), mount + "/api/workspace/vaults/live");
   assert.equal(artifactPreviewUrl("a/b", "report"), mount + "/api/workflow-runs/a%2Fb/artifacts/report");
