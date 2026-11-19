@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import{describe,getCards,getDataInventory}from'../praxis-provider.mjs';
+test('runtime publishes inventory without joining the workbench card queue',async()=>{assert.equal(describe().cards.supported,false);assert.equal(describe().role,'runtime');assert.deepEqual(await getCards(),{status:'unsupported',items:[],reason:'runtime'});const value=await getDataInventory({resolveDataSource:async()=>({applicationPath:'/synthetic/observations.json',status:'ready'})});assert.equal(value.items[0].applicationPath,'/synthetic/observations.json');assert.equal(value.status,'ready');});
+test('missing runtime location is explicit and does not fabricate a data path',async()=>{const value=await getDataInventory({resolveDataSource:async()=>{throw Error('missing')}});assert.equal(value.status,'unavailable');assert.equal(value.items[0].status,'unavailable');assert.equal(value.items[0].applicationPath,undefined);});
