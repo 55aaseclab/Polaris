@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-Built from the [Polaris](https://github.com/55aaseclab/Polaris) native portal under its Apache 2.0 license, this built-in edition provides the native Polaris work desk, run cards, execution timelines and workflow graphs. It reads the chosen workspace’s observations. No executor is needed to view existing observations.
+This Apache 2.0 edition of [Polaris](https://github.com/55aaseclab/polaris) provides the native Polaris work desk, run cards, execution timelines and workflow graphs. It reads the chosen workspace’s observations. No executor is needed to view existing observations.
 
 Use Node 22.16 or later. Run `npm ci`, `npm run build`, `npm test` and `npm start`, then open http://127.0.0.1:8787/. The server binds to loopback. With no data configured, the workflow catalog and work desk are empty. Choose the English or Simplified Chinese interface in the portal navigation.
 
