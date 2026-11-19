@@ -1,0 +1,33 @@
+{
+  "name": "polaris-portal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/portal-navigation.test.ts src/workflow-graph-layout.test.ts"
+  },
+  "dependencies": {
+    "@polaris/polaris-shell": "*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dagre-d3-es": "7.0.14",
+    "lucide-react": "^1.29.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.6.0",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.0.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^8.2.0"
+  }
+}

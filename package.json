@@ -1,0 +1,20 @@
+{
+  "name": "polaris-reader",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "apps/polaris-portal",
+    "packages/polaris-shell",
+    "packages/surface-wanghai"
+  ],
+  "engines": {
+    "node": ">=22.16"
+  },
+  "scripts": {
+    "build": "npm run build -w @polaris/surface-wanghai && npm run build -w @polaris/polaris-shell && npm run typecheck -w polaris-portal && npm run build -w polaris-portal",
+    "start": "node server.mjs",
+    "test": "npm test -w polaris-portal && node --test test/*.test.mjs"
+  }
+}
