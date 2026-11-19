@@ -3,6 +3,7 @@ import {constants} from 'node:fs';
 import {open, readFile, realpath} from 'node:fs/promises';
 import {isAbsolute, resolve, sep} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
+import {projectRuntimeTraces} from './praxis-provider.mjs';
 
 const root=fileURLToPath(new URL('.',import.meta.url)).replace(/\/$/,'');
 const dist=resolve(root,'apps/polaris-portal/dist');
@@ -50,6 +51,11 @@ export function observerServer({workspaceId='local',file}={}){
   if(path.startsWith('/api/')){
    let s;try{s=await loadObservations(file,workspaceId);}catch{return result(res,method,503,{error:'Workspace observations unavailable'});}
    const answer=value=>result(res,method,200,value),missing=()=>result(res,method,404,{error:'Observation unavailable'});
+   if(path==='/api/praxis/traces'){
+    if([...url.searchParams.keys()].some(key=>!['before','limit'].includes(key)||url.searchParams.getAll(key).length!==1))return result(res,method,400,{error:'Invalid trace query'});
+    const before=url.searchParams.has('before')?Number(url.searchParams.get('before')):Number.MAX_SAFE_INTEGER,limit=url.searchParams.has('limit')?Number(url.searchParams.get('limit')):25;
+    try{return answer(projectRuntimeTraces(s,{configured:Boolean(file),before,limit}));}catch{return result(res,method,400,{error:'Invalid trace query'});}
+   }
    if(path==='/api/workspace')return answer({workspaceId,vaultMode:'host',line:null});
    if(path==='/api/domain-packs')return answer({packs:s.packs});
    if(path==='/api/workflow-setup')return answer(s.setup);

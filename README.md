@@ -11,3 +11,6 @@ An external workflow system can publish a read-only JSON snapshot outside the so
 [Product requirements](apps/docs/site/development/prd.md) · [Roadmap](apps/docs/site/development/roadmap.md) · [Apache 2.0 license](LICENSE)
 
 The app-owned `praxis-provider.mjs` describes the runtime observation data location for Praxis Settings. Polaris is the runtime and does not publish workbench cards.
+
+
+The read-only internal `GET /api/praxis/traces` endpoint and provider `getTraces` publish only approved observation metadata: run/flow identifiers, recorded state and times, available versions, bounded step metadata and opaque artifact references. No command, raw log, error body, input/output body or credential is included. Pagination covers existing failed runs too. This source establishes runtime observations, not historical MCP invocation, commit or readback evidence.
