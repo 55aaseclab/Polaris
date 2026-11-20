@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+
+# Build this application from its own repository context.
+FROM ${NODE_IMAGE} AS base
+ARG PRAXIS_UID=1000
+ARG PRAXIS_GID=1000
+WORKDIR /app
+ENV NODE_ENV=production HOST=127.0.0.1
+RUN groupmod -o -g "${PRAXIS_GID}" node && usermod -o -u "${PRAXIS_UID}" node \
+    && mkdir -p /app /data /data/home && chown -R node:node /app /data /home/node
+USER node
+
+FROM base AS polaris-build
+COPY --chown=node:node package.json package-lock.json ./
+COPY --chown=node:node apps/polaris-portal/package.json ./apps/polaris-portal/
+COPY --chown=node:node packages/polaris-shell/package.json ./packages/polaris-shell/
+COPY --chown=node:node packages/surface-wanghai/package.json ./packages/surface-wanghai/
+RUN npm ci --include=dev --ignore-scripts --no-audit --no-fund
+COPY --chown=node:node apps/polaris-portal/src/ ./apps/polaris-portal/src/
+COPY --chown=node:node apps/polaris-portal/scripts/ ./apps/polaris-portal/scripts/
+COPY --chown=node:node apps/polaris-portal/index.html apps/polaris-portal/tsconfig.json apps/polaris-portal/vite.config.ts ./apps/polaris-portal/
+COPY --chown=node:node packages/polaris-shell/src/ ./packages/polaris-shell/src/
+COPY --chown=node:node packages/polaris-shell/tsconfig.json ./packages/polaris-shell/
+COPY --chown=node:node packages/surface-wanghai/src/ ./packages/surface-wanghai/src/
+COPY --chown=node:node packages/surface-wanghai/tsconfig.json ./packages/surface-wanghai/
+RUN npm run build
+
+FROM base AS polaris
+COPY --chown=node:node package.json server.mjs praxis-provider.mjs ./
+COPY --from=polaris-build --chown=node:node /app/apps/polaris-portal/dist/ ./apps/polaris-portal/dist/
+ENV PORT=18787
+EXPOSE 18787
+CMD ["node", "server.mjs"]
