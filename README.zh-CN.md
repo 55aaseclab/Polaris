@@ -10,3 +10,9 @@
 
 
 内部只读 `GET /api/praxis/traces` 与 provider `getTraces` 只提供经批准观察的元数据，包括运行与流程标识、已记录状态和时间、已有版本、有限分段元数据及不透明产物引用。不返回命令、原始日志、错误正文、输入输出或凭据。分页保留失败运行。本来源只证明运行观察，不补造历史 MCP 调用、提交或回读。
+
+## Praxis 登记
+
+应用发行版本：`0.1.2`。本应用维护 [`praxis-app.json`](praxis-app.json)、英中展示文案、`public/praxis-icon.svg` 图标、PRD 路径及需要保留的旧图标别名。`schemaVersion: 1` 表示登记格式，与应用发行版本、数据、协议和文档修订分别管理；已有 package 和 lockfile 的发行版本须与声明一致。
+
+[`apps.example.json`](apps.example.json) 引用 `./praxis-app.json`，使用 `http://127.0.0.1:8787/` 登记本地别名。先按上文启动独立服务；登记不启动后端，也不授予账号、管理员或业务数据权限。安装地址、数据位置与授权策略仍独立配置。

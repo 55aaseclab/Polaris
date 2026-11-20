@@ -14,3 +14,9 @@ The app-owned `praxis-provider.mjs` describes the runtime observation data locat
 
 
 The read-only internal `GET /api/praxis/traces` endpoint and provider `getTraces` publish only approved observation metadata: run/flow identifiers, recorded state and times, available versions, bounded step metadata and opaque artifact references. No command, raw log, error body, input/output body or credential is included. Pagination covers existing failed runs too. This source establishes runtime observations, not historical MCP invocation, commit or readback evidence.
+
+## Praxis registration
+
+App release: `0.1.2`. The app owns [`praxis-app.json`](praxis-app.json), its English and Simplified Chinese presentation, the icon at `public/praxis-icon.svg`, the declared PRD locations and any legacy icon aliases. `schemaVersion: 1` identifies the registration format; it is separate from this app release and from data, protocol and document revisions. Package and lockfile release metadata, where present, agree with the declaration.
+
+[`apps.example.json`](apps.example.json) registers a local alias by referencing `./praxis-app.json` and `http://127.0.0.1:8787/`. Start the standalone service described above before using the example; registration does not start a backend or grant account, administrator or business-data access. Installation origins, data locations and access policy remain separately configured.

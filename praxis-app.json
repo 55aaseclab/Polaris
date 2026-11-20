@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "polaris",
+  "version": "0.1.2",
+  "kind": "app",
+  "name": "Polaris",
+  "description": "Read academic workflow updates",
+  "labels": {
+    "en": {
+      "name": "Polaris",
+      "description": "Read academic workflow updates"
+    },
+    "zh": {
+      "name": "Polaris",
+      "description": "查看学术工作流进展"
+    }
+  },
+  "icon": "public/praxis-icon.svg",
+  "iconAliases": [
+    "/polaris-icon.svg"
+  ],
+  "path": "/",
+  "port": 8787,
+  "adminOnly": true,
+  "documents": {
+    "prd": {
+      "en": "apps/docs/site/development/prd.md",
+      "zh": "apps/docs/site/development/prd.zh-CN.md"
+    }
+  }
+}
